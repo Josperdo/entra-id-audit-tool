@@ -1,0 +1,48 @@
+# PowerShell
+*.ps1~
+*.psd1
+*.psm1~
+
+# Reports / output (tenant-specific data must never be committed)
+reports/
+*.csv
+*.json
+!samples/output/sample-data.json
+!scripts/config/audit-config.example.json
+
+# Secrets
+.env
+.env.local
+credentials.json
+config.local.json
+scripts/config/audit-config.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+logs/
+
+# Node (if added later)
+node_modules/
+package-lock.json
+
+# Python (if added later)
+__pycache__/
+*.pyc
+.venv/
+
+# Claude / local notes (not for public repos)
+Claude.md
+CLAUDE.md
+tasks/lessons.md
+tasks/todo.md
+ROADMAP.md
+Security.md
