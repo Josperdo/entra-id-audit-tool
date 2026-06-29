@@ -36,7 +36,7 @@ Install-Module Microsoft.Graph -Scope CurrentUser
 
 ## Project Status
 
-**In development** — see [ROADMAP.md](ROADMAP.md) for current phase and progress.
+**In development**
 
 ## Documentation
 
