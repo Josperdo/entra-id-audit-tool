@@ -1,0 +1,237 @@
+{
+  "metadata": {
+    "tenantDomain": "contoso.onmicrosoft.com",
+    "generatedAt": "2026-06-28T14:32:00Z",
+    "toolVersion": "0.1.0",
+    "checksRun": [
+      "stale-accounts",
+      "no-mfa",
+      "guest-review",
+      "privileged-roles",
+      "stale-service-principals",
+      "ca-policy-gaps"
+    ]
+  },
+  "summary": {
+    "totalFindings": 17,
+    "bySeverity": {
+      "Critical": 5,
+      "High": 5,
+      "Medium": 7
+    },
+    "byCheck": {
+      "stale-accounts": 4,
+      "no-mfa": 3,
+      "guest-review": 3,
+      "privileged-roles": 2,
+      "stale-service-principals": 3,
+      "ca-policy-gaps": 2
+    }
+  },
+  "findings": [
+    {
+      "id": "F-001",
+      "checkId": "stale-accounts",
+      "checkName": "Stale/Inactive Accounts",
+      "severity": "Medium",
+      "objectType": "User",
+      "affectedObject": "jmartinez@contoso.com",
+      "title": "No sign-in activity in 104 days",
+      "description": "User account has not signed in since 2026-03-16. Account is enabled and retains all assigned licenses and group memberships.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Confirm with the user's manager whether the account is still needed. Disable if no longer required, or document the reason for continued inactivity."
+    },
+    {
+      "id": "F-002",
+      "checkId": "stale-accounts",
+      "checkName": "Stale/Inactive Accounts",
+      "severity": "Medium",
+      "objectType": "User",
+      "affectedObject": "bsingh@contoso.com",
+      "title": "No sign-in activity in 88 days",
+      "description": "User account has not signed in since 2026-04-01. Account is enabled and holds membership in 2 security groups.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Confirm with the user's manager whether the account is still needed. Disable if no longer required, or document the reason for continued inactivity."
+    },
+    {
+      "id": "F-003",
+      "checkId": "stale-accounts",
+      "checkName": "Stale/Inactive Accounts",
+      "severity": "Medium",
+      "objectType": "User",
+      "affectedObject": "svc-reports@contoso.com",
+      "title": "No sign-in activity in 142 days",
+      "description": "Account naming suggests automated/service use, but is provisioned as a standard user account rather than a service principal. No sign-in since 2026-02-06.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Determine the original purpose of this account. If it is functioning as a service identity, migrate it to an app registration/service principal. Otherwise disable."
+    },
+    {
+      "id": "F-004",
+      "checkId": "stale-accounts",
+      "checkName": "Stale/Inactive Accounts",
+      "severity": "Medium",
+      "objectType": "User",
+      "affectedObject": "kwilliams@contoso.com",
+      "title": "No sign-in activity in 61 days",
+      "description": "User account has not signed in since 2026-04-28. Just past the 60-day organizational threshold.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Confirm with the user's manager whether the account is still needed. Disable if no longer required, or document the reason for continued inactivity."
+    },
+    {
+      "id": "F-005",
+      "checkId": "no-mfa",
+      "checkName": "Users Without MFA",
+      "severity": "Critical",
+      "objectType": "User",
+      "affectedObject": "achen@contoso.com",
+      "title": "MFA not registered",
+      "description": "User has no multi-factor authentication method registered. Authentication relies on password only.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Enforce MFA registration via Conditional Access or per-user MFA. Notify the user and require enrollment before next sign-in."
+    },
+    {
+      "id": "F-006",
+      "checkId": "no-mfa",
+      "checkName": "Users Without MFA",
+      "severity": "Critical",
+      "objectType": "User",
+      "affectedObject": "dthompson@contoso.com",
+      "title": "MFA not registered",
+      "description": "User has no multi-factor authentication method registered. Authentication relies on password only.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Enforce MFA registration via Conditional Access or per-user MFA. Notify the user and require enrollment before next sign-in."
+    },
+    {
+      "id": "F-007",
+      "checkId": "no-mfa",
+      "checkName": "Users Without MFA",
+      "severity": "Critical",
+      "objectType": "User",
+      "affectedObject": "rpatel@contoso.com",
+      "title": "MFA not registered",
+      "description": "User has no multi-factor authentication method registered. Account also holds membership in a privileged-access group.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Treat as high priority given group membership. Enforce MFA registration immediately and review associated access."
+    },
+    {
+      "id": "F-008",
+      "checkId": "guest-review",
+      "checkName": "Guest Account Review",
+      "severity": "Medium",
+      "objectType": "Guest",
+      "affectedObject": "lwong_partnerco.com#EXT#@contoso.onmicrosoft.com",
+      "title": "Guest account inactive 75 days, retains access to 3 groups",
+      "description": "External guest account has not signed in since 2026-04-14 but remains a member of 3 groups, including a shared document library.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Confirm the collaboration is still active with the sponsoring internal owner. Remove guest access if the engagement has ended."
+    },
+    {
+      "id": "F-009",
+      "checkId": "guest-review",
+      "checkName": "Guest Account Review",
+      "severity": "Medium",
+      "objectType": "Guest",
+      "affectedObject": "mgarcia_vendorllc.com#EXT#@contoso.onmicrosoft.com",
+      "title": "Guest account inactive 120 days, retains access to 1 group",
+      "description": "External guest account has not signed in since 2026-02-28. Sponsoring owner could not be determined from available metadata.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Identify the sponsoring owner. If none can be found, remove the guest account as part of routine cleanup."
+    },
+    {
+      "id": "F-010",
+      "checkId": "guest-review",
+      "checkName": "Guest Account Review",
+      "severity": "Medium",
+      "objectType": "Guest",
+      "affectedObject": "tnguyen_consultingco.com#EXT#@contoso.onmicrosoft.com",
+      "title": "Guest account never signed in since invite, 30 days ago",
+      "description": "Guest invitation accepted on 2026-05-29 but no sign-in has occurred since.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Confirm whether the collaboration is still expected to proceed. Remove if the invitation is no longer needed."
+    },
+    {
+      "id": "F-011",
+      "checkId": "privileged-roles",
+      "checkName": "Privileged Role Assignments",
+      "severity": "Critical",
+      "objectType": "User",
+      "affectedObject": "ssmith@contoso.com",
+      "title": "Permanent Global Administrator assignment (not via PIM)",
+      "description": "User holds a standing, permanent assignment to the Global Administrator role. No eligible/just-in-time activation is configured.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Convert to a Privileged Identity Management (PIM) eligible assignment requiring justification and time-bound activation. Reserve permanent assignments for break-glass accounts only."
+    },
+    {
+      "id": "F-012",
+      "checkId": "privileged-roles",
+      "checkName": "Privileged Role Assignments",
+      "severity": "Critical",
+      "objectType": "User",
+      "affectedObject": "jlee@contoso.com",
+      "title": "Permanent Privileged Role Administrator assignment (not via PIM)",
+      "description": "User holds a standing, permanent assignment to the Privileged Role Administrator role, which can grant role assignments to any other user.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Convert to a PIM-eligible assignment. Review whether this user requires the role at all given its scope to grant further privileged access."
+    },
+    {
+      "id": "F-013",
+      "checkId": "stale-service-principals",
+      "checkName": "Stale/Orphaned Service Principals & App Registrations",
+      "severity": "High",
+      "objectType": "ServicePrincipal",
+      "affectedObject": "Internal Reporting App",
+      "title": "No sign-in activity in 210 days; client secret expires in 14 days",
+      "description": "Service principal has not authenticated in 210 days. Its client secret is set to expire 2026-07-12.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Confirm whether the application is still in use. If not, remove the registration. If it is, rotate the expiring secret and investigate the lack of recent activity."
+    },
+    {
+      "id": "F-014",
+      "checkId": "stale-service-principals",
+      "checkName": "Stale/Orphaned Service Principals & App Registrations",
+      "severity": "High",
+      "objectType": "ServicePrincipal",
+      "affectedObject": "Legacy SharePoint Connector",
+      "title": "No sign-in activity in 365+ days; credential never rotated",
+      "description": "Service principal has shown no authentication activity in over a year. The application credential has never been rotated since creation.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Remove this app registration if it is confirmed unused. If retained for any reason, rotate credentials immediately and document the business justification."
+    },
+    {
+      "id": "F-015",
+      "checkId": "stale-service-principals",
+      "checkName": "Stale/Orphaned Service Principals & App Registrations",
+      "severity": "High",
+      "objectType": "ServicePrincipal",
+      "affectedObject": "Vendor Integration Service",
+      "title": "Holds Directory.ReadWrite.All; last used 95 days ago",
+      "description": "Service principal is granted the broad Directory.ReadWrite.All application permission but has not authenticated in 95 days.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Review whether the granted permission scope matches actual usage. Reduce to a narrower read-only scope if possible, or remove the registration if no longer needed."
+    },
+    {
+      "id": "F-016",
+      "checkId": "ca-policy-gaps",
+      "checkName": "Conditional Access Policy Gaps",
+      "severity": "High",
+      "objectType": "Group",
+      "affectedObject": "Contractors",
+      "title": "Group excluded from all enabled Conditional Access policies",
+      "description": "The 'Contractors' group is listed as an exclusion on every enabled Conditional Access policy, including the baseline MFA-enforcement policy.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Review the exclusion's original justification. Remove the exclusion or apply a scoped policy covering this group rather than leaving it fully uncovered."
+    },
+    {
+      "id": "F-017",
+      "checkId": "ca-policy-gaps",
+      "checkName": "Conditional Access Policy Gaps",
+      "severity": "High",
+      "objectType": "Policy",
+      "affectedObject": "Require MFA for All Users",
+      "title": "Policy is in Report-only mode 45 days past pilot window",
+      "description": "The 'Require MFA for All Users' Conditional Access policy has remained in Report-only mode since 2026-05-14, well past its intended 2-week pilot window, providing no actual enforcement.",
+      "detectedAt": "2026-06-28T14:32:00Z",
+      "remediation": "Review sign-in logs captured during the report-only period for unexpected impact, then switch the policy to 'On' to begin enforcement."
+    }
+  ]
+}
