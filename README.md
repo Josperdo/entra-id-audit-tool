@@ -40,9 +40,7 @@ Install-Module Microsoft.Graph -Scope CurrentUser
 
 ## Documentation
 
-- [ROADMAP.md](ROADMAP.md) — phased build plan
 - [SETUP.md](SETUP.md) — prerequisites and local setup
 - [TECHNICAL.md](TECHNICAL.md) — architecture and design decisions
 - [AUDIT-CHECKS.md](AUDIT-CHECKS.md) — details on each audit check
-- [SECURITY.md](Security.md) — security standards for this project
 - [CLOUD.md](CLOUD.md) — cloud architecture and integration notes
