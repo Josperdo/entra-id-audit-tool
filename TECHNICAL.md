@@ -48,7 +48,7 @@ This document covers the architecture, component responsibilities, and technolog
 
 ### HTML/CSS/JS Dashboard
 
-A single self-contained HTML file (no build tooling, no external dependencies) that reads the audit JSON and renders:
+A self-contained `dashboard/` bundle (`index.html`, `styles.css`, `app.js` — no build tooling, no external dependencies) that reads the audit JSON and renders:
 
 - Summary cards and metrics grid
 - A sortable, searchable findings table
