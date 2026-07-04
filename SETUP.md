@@ -15,6 +15,58 @@
   - `Application.Read.All`
 - A modern browser (Chrome/Edge/Firefox) to view the dashboard — no server required.
 
+## App Registration Setup (Entra ID)
+
+Before running the script you need an App Registration in your Entra ID tenant with the required read-only Graph API permissions.
+
+### 1. Create the App Registration
+
+1. Go to [portal.azure.com](https://portal.azure.com) → **Microsoft Entra ID** → **App registrations** → **New registration**
+2. Fill in:
+   - **Name:** `entra-audit-tool` (or any name you'll recognise)
+   - **Supported account types:** Accounts in this organizational directory only (single tenant)
+   - **Redirect URI:** leave blank
+3. Click **Register**
+4. On the overview page, copy and save:
+   - **Application (client) ID** → this is `appOnly.clientId` in your config
+   - **Directory (tenant) ID** → this is `tenantId` in your config
+
+### 2. Grant API Permissions
+
+1. In your App Registration → **API permissions** → **Add a permission** → **Microsoft Graph** → **Application permissions**
+2. Search for and add each of the following:
+   - `User.Read.All`
+   - `AuditLog.Read.All`
+   - `Policy.Read.All`
+   - `RoleManagement.Read.Directory`
+   - `Application.Read.All`
+3. Click **Grant admin consent for [your tenant]** — required for application permissions
+
+> These are all read-only scopes. The app cannot modify any directory data.
+
+### 3. Add a Certificate (App-Only Auth)
+
+App-only auth requires a certificate rather than a client secret (secrets are less secure for unattended use).
+
+```powershell
+# Generate a self-signed certificate (run once, save the thumbprint)
+$cert = New-SelfSignedCertificate `
+    -Subject "CN=entra-audit-tool" `
+    -CertStoreLocation "Cert:\CurrentUser\My" `
+    -KeyExportPolicy Exportable `
+    -NotAfter (Get-Date).AddYears(2)
+
+Write-Host "Thumbprint: $($cert.Thumbprint)"
+```
+
+Then in the portal: App Registration → **Certificates & secrets** → **Certificates** → **Upload certificate** → select the `.cer` export of the cert above.
+
+Copy the thumbprint into `appOnly.certificateThumbprint` in your config.
+
+> **Delegated auth alternative:** If you just want to run interactively (browser sign-in), leave `authMode` as `"delegated"` in your config and skip the certificate step entirely.
+
+---
+
 ## Local Development Setup
 
 ```powershell

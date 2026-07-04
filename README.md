@@ -36,7 +36,11 @@ Install-Module Microsoft.Graph -Scope CurrentUser
 
 ## Project Status
 
-**In development**
+**Backend and dashboard complete.** All six audit checks are implemented. Requires a Microsoft 365 / Entra ID tenant and an App Registration with read-only Graph scopes to run live — see [SETUP.md](SETUP.md). The dashboard can be opened locally with sample data for a no-credential demo.
+
+## Known Limitations
+
+- **Stale/inactive accounts**, **users without MFA**, and **guest account review** rely on the `signInActivity` property and the `userRegistrationDetails` report, both of which require an **Azure AD Premium P1 or P2** license on the tenant. On tenants without that license, Graph returns `403 Forbidden` (`Authentication_RequestFromNonPremiumTenantOrB2CTenant`) for these checks and they're skipped — this is a Graph API licensing restriction, not a bug in the tool.
 
 ## Documentation
 

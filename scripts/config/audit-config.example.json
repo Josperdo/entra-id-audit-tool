@@ -1,0 +1,26 @@
+{
+  "tenantId": "<your-tenant-id-or-domain>",
+  "authMode": "delegated",
+  "appOnly": {
+    "clientId": "<app-registration-client-id>",
+    "certificateThumbprint": "<certificate-thumbprint>"
+  },
+  "thresholds": {
+    "staleAccountDays": 90,
+    "staleGuestDays": 90,
+    "staleServicePrincipalDays": 180,
+    "secretExpiryWarningDays": 30
+  },
+  "checks": {
+    "stale-accounts": true,
+    "no-mfa": true,
+    "guest-review": true,
+    "privileged-roles": true,
+    "stale-service-principals": true,
+    "ca-policy-gaps": true
+  },
+  "output": {
+    "directory": "../../reports",
+    "includeCsv": true
+  }
+}
