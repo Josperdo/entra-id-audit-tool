@@ -8,6 +8,8 @@ The tool follows a linear, single-direction data flow: a PowerShell script queri
 
 In its current form, every component runs on the operator's local machine. An optional future deployment would move the script's execution to Azure Automation while keeping the same data contract, so the dashboard would not need to change.
 
+The dashboard has two hosting modes today. Loading a pre-generated JSON report or the bundled sample data works via a plain `file://` URL — no server, no network access needed. **Live Mode** (`dashboard/live.js`) is a third identity flow alongside the PowerShell script's delegated/app-only modes: the browser authenticates directly to Entra ID (MSAL.js, PKCE) and calls Graph itself. This requires the dashboard be served over `http(s)://`, since browser OAuth flows don't work from `file://` — a local static server (documented in SETUP.md) satisfies this today; if the dashboard is ever hosted on Azure Static Web Apps (below), that requirement is met automatically. The local server is not "application infrastructure" — it exists solely to give the browser a real origin to redirect through.
+
 ## Entra ID / Microsoft Graph Integration
 
 Each audit check queries a specific Microsoft Graph endpoint — for example `/users` and `/reports/authenticationMethods/userRegistrationDetails` for identity and MFA checks, `/roleManagement/directory/roleAssignments` for privileged role review, and `/identity/conditionalAccess/policies` for Conditional Access coverage. The full endpoint-to-check mapping is documented in [AUDIT-CHECKS.md](AUDIT-CHECKS.md).

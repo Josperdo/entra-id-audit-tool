@@ -17,7 +17,7 @@ The tool runs six audit checks against a tenant via Microsoft Graph API and prod
 5. **Stale/orphaned service principals & app registrations** — unused or overly permissioned apps
 6. **Conditional Access policy gaps** — coverage gaps in CA policy enforcement
 
-Results are exported to JSON and rendered in a self-contained HTML dashboard for review.
+Results are exported to JSON and rendered in a self-contained HTML dashboard for review. The dashboard can also run entirely in the browser via **Live Mode** — see below — calling Microsoft Graph directly instead of loading a pre-generated report.
 
 ## Quick Start
 
@@ -34,13 +34,23 @@ Install-Module Microsoft.Graph -Scope CurrentUser
 .\dashboard\index.html
 ```
 
+### Live Mode (optional)
+
+Instead of running the PowerShell script, the dashboard can authenticate to Entra ID itself and call Graph directly. This requires serving it over `http://` (MSAL.js browser auth doesn't work via `file://`) and a SPA platform on your App Registration — see [SETUP.md](SETUP.md#4-spa-app-registration-setup-live-dashboard-mode):
+
+```powershell
+npx serve dashboard
+# open http://localhost:5500 and click "Connect Live"
+```
+
 ## Project Status
 
-**Backend and dashboard complete.** All six audit checks are implemented. Requires a Microsoft 365 / Entra ID tenant and an App Registration with read-only Graph scopes to run live — see [SETUP.md](SETUP.md). The dashboard can be opened locally with sample data for a no-credential demo.
+**Backend and dashboard complete.** All six audit checks are implemented, both as a PowerShell batch pipeline and as a faithful client-side JS port for Live Mode. Requires a Microsoft 365 / Entra ID tenant and an App Registration with read-only Graph scopes to run live — see [SETUP.md](SETUP.md). The dashboard can be opened locally with sample data for a no-credential demo.
 
 ## Known Limitations
 
-- **Stale/inactive accounts**, **users without MFA**, and **guest account review** rely on the `signInActivity` property and the `userRegistrationDetails` report, both of which require an **Azure AD Premium P1 or P2** license on the tenant. On tenants without that license, Graph returns `403 Forbidden` (`Authentication_RequestFromNonPremiumTenantOrB2CTenant`) for these checks and they're skipped — this is a Graph API licensing restriction, not a bug in the tool.
+- **Stale/inactive accounts**, **users without MFA**, and **guest account review** rely on the `signInActivity` property and the `userRegistrationDetails` report, both of which require an **Azure AD Premium P1 or P2** license on the tenant. On tenants without that license, Graph returns `403 Forbidden` (`Authentication_RequestFromNonPremiumTenantOrB2CTenant`) for these checks and they're skipped — this is a Graph API licensing restriction, not a bug in the tool. This applies identically in Live Mode, surfaced per-check in the live-status panel rather than blocking the other 3 checks.
+- **Live Mode requires local `http(s)` hosting**, not a `file://` URL, since MSAL.js's browser auth flow needs a real origin. File-upload and sample-data modes are unaffected and still need no server.
 
 ## Documentation
 

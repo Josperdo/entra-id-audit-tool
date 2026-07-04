@@ -15,15 +15,37 @@
       Tenant: <span id="meta-tenant">—</span> &middot;
       Generated: <span id="meta-generated">—</span> &middot;
       Tool version: <span id="meta-version">—</span>
+      <span id="live-connected-badge" class="live-badge not-connected">Not connected live</span>
     </div>
   </div>
   <div class="controls">
     <label class="file-label" for="file-input">Load Report (JSON)</label>
     <input type="file" id="file-input" accept="application/json" class="visually-hidden">
     <button id="load-sample-btn" class="secondary" type="button">Load Sample Data</button>
+    <button id="connect-live-btn" class="live" type="button">Connect Live</button>
+    <button id="live-disconnect-btn" class="secondary" type="button" style="display:none;">Disconnect</button>
     <button id="export-csv-btn" type="button">Export CSV</button>
   </div>
 </header>
+
+<div id="live-connect-form" class="live-form" style="display:none;">
+  <h3>Connect to Microsoft Graph</h3>
+  <p>Requires a SPA App Registration — see SETUP.md "SPA App Registration Setup (Live Dashboard Mode)".</p>
+  <label for="live-tenant-id">Tenant ID</label>
+  <input type="text" id="live-tenant-id" placeholder="00000000-0000-0000-0000-000000000000">
+  <label for="live-client-id">Client ID</label>
+  <input type="text" id="live-client-id" placeholder="00000000-0000-0000-0000-000000000000">
+  <div class="live-form-error" id="live-connect-error"></div>
+  <div class="live-form-actions">
+    <button id="live-connect-cancel" class="secondary" type="button">Cancel</button>
+    <button id="live-connect-submit" type="button">Connect</button>
+  </div>
+</div>
+
+<section id="live-status-panel" class="panel" style="display:none;">
+  <div class="panel-header">Live Audit Progress</div>
+  <div id="live-status-list"></div>
+</section>
 
 <main>
   <section class="cards" id="summary-cards" aria-label="Findings summary"></section>
@@ -69,6 +91,8 @@
   </section>
 </main>
 
+<script src="msal-browser.min.js"></script>
+<script src="live.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

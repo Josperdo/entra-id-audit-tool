@@ -431,4 +431,8 @@
 
   // Load sample data by default so the dashboard is immediately viewable.
   loadData(JSON.parse(JSON.stringify(SAMPLE_DATA)));
+
+  // Single integration seam for Live Mode (live.js) to feed a client-built
+  // report into the same render pipeline file-upload/sample-data already use.
+  window.EntraAuditDashboard = { loadData: loadData };
 })();
