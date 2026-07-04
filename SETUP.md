@@ -81,7 +81,7 @@ Install-Module Microsoft.Graph -Scope CurrentUser
 Copy-Item .\scripts\config\audit-config.example.json .\scripts\config\audit-config.json
 ```
 
-> `audit-config.json` is gitignored — never commit tenant IDs, client secrets, or other tenant-specific values. See [SECURITY.md](Security.md).
+> `audit-config.json` is gitignored — never commit tenant IDs, client secrets, or other tenant-specific values. See [Security.md](Security.md).
 
 ## Running the Script Locally
 

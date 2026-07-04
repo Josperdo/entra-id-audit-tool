@@ -97,7 +97,7 @@ Describe 'New-AuditReport' {
 
         $report.metadata | Should -Not -BeNullOrEmpty
         $report.summary  | Should -Not -BeNullOrEmpty
-        $report.findings | Should -Not -BeNull
+        $report.PSObject.Properties.Name | Should -Contain 'findings'
     }
 
     It 'populates metadata fields correctly' {

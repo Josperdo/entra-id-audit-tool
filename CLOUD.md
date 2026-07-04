@@ -6,7 +6,7 @@ This document defines how this project integrates with cloud services and how it
 
 The tool follows a linear, single-direction data flow: a PowerShell script queries Microsoft Graph, normalizes the results into a JSON report, and a static HTML dashboard renders that report. There is no persistent backend or always-on service — each run produces a self-contained snapshot. See [TECHNICAL.md](TECHNICAL.md) for the full architecture diagram.
 
-In its current form, every component runs on the operator's local machine. The optional Phase 4 deployment (see [ROADMAP.md](ROADMAP.md)) would move the script's execution to Azure Automation while keeping the same data contract, so the dashboard would not need to change.
+In its current form, every component runs on the operator's local machine. An optional future deployment would move the script's execution to Azure Automation while keeping the same data contract, so the dashboard would not need to change.
 
 ## Entra ID / Microsoft Graph Integration
 
