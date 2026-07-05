@@ -130,7 +130,7 @@ main {
 }
 
 .card .value {
-  font-size: 2rem;
+  font-size: 1.5rem;
   font-weight: 700;
   line-height: 1;
 }
@@ -143,10 +143,29 @@ main {
   letter-spacing: 0.03em;
 }
 
+.label-icon {
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-size: 0.7rem;
+}
+
 .card.critical .value { color: var(--critical); }
 .card.high .value { color: var(--high); }
 .card.medium .value { color: var(--medium); }
-.card.total .value { color: var(--text); }
+.card.critical .label-icon { color: var(--critical); }
+.card.high .label-icon { color: var(--high); }
+.card.medium .label-icon { color: var(--medium); }
+
+/* Total Findings is the hero figure — the one number this dashboard leads
+   with — so it reads at a clear glance above the severity breakdown. */
+.card.total {
+  border-left: 4px solid var(--accent);
+}
+
+.card.total .value {
+  font-size: 3rem;
+  color: var(--text);
+}
 
 section.panel {
   background: var(--card-bg);
@@ -276,11 +295,17 @@ tr.expanded .chevron {
 }
 
 .badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+.badge-icon {
+  margin-right: 0.3rem;
+  font-size: 0.65rem;
 }
 
 .badge.critical { background: var(--critical-bg); color: var(--critical); }

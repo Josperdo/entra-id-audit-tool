@@ -84,6 +84,14 @@
     return (sev || "low").toLowerCase();
   }
 
+  // Distinct shapes, not just color, so severity is never color-alone —
+  // matters for colorblind users and still reads in grayscale/print.
+  var SEVERITY_ICON = { Critical: "▲", High: "◆", Medium: "●", Low: "○" };
+
+  function severityIcon(sev) {
+    return SEVERITY_ICON[sev] || SEVERITY_ICON.Low;
+  }
+
   function loadData(json) {
     if (!json || !Array.isArray(json.findings)) {
       alert("That file doesn't look like a valid audit report (missing a 'findings' array).");
@@ -136,10 +144,10 @@
     });
 
     var cards = [
-      { label: "Total Findings", value: findings.length, cls: "total" },
-      { label: "Critical", value: bySeverity.Critical, cls: "critical" },
-      { label: "High", value: bySeverity.High, cls: "high" },
-      { label: "Medium", value: bySeverity.Medium, cls: "medium" }
+      { label: "Total Findings", value: findings.length, cls: "total", icon: "" },
+      { label: "Critical", value: bySeverity.Critical, cls: "critical", icon: severityIcon("Critical") },
+      { label: "High", value: bySeverity.High, cls: "high", icon: severityIcon("High") },
+      { label: "Medium", value: bySeverity.Medium, cls: "medium", icon: severityIcon("Medium") }
     ];
 
     el.summaryCards.innerHTML = "";
@@ -151,7 +159,14 @@
       value.textContent = String(c.value);
       var label = document.createElement("div");
       label.className = "label";
-      label.textContent = c.label;
+      if (c.icon) {
+        var labelIcon = document.createElement("span");
+        labelIcon.className = "label-icon";
+        labelIcon.textContent = c.icon;
+        labelIcon.setAttribute("aria-hidden", "true");
+        label.appendChild(labelIcon);
+      }
+      label.appendChild(document.createTextNode(c.label));
       div.appendChild(value);
       div.appendChild(label);
       el.summaryCards.appendChild(div);
@@ -235,7 +250,12 @@
       var tdSeverity = document.createElement("td");
       var badge = document.createElement("span");
       badge.className = "badge " + severityClass(f.severity);
-      badge.textContent = f.severity || "Unknown";
+      var badgeIcon = document.createElement("span");
+      badgeIcon.className = "badge-icon";
+      badgeIcon.textContent = severityIcon(f.severity);
+      badgeIcon.setAttribute("aria-hidden", "true");
+      badge.appendChild(badgeIcon);
+      badge.appendChild(document.createTextNode(f.severity || "Unknown"));
       tdSeverity.appendChild(badge);
 
       var tdCheck = document.createElement("td");
