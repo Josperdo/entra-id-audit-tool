@@ -2,6 +2,8 @@
 
 Automated identity governance audit for Azure/Entra ID
 
+![Entra ID Audit Dashboard showing findings summary and severity breakdown](docs/dashboard-screenshot.png)
+
 ## Why This Exists
 
 Identity sprawl is one of the most common root causes behind cloud security incidents — stale guest accounts, users without MFA, orphaned admin roles, and over-privileged service principals accumulate silently in most Entra ID tenants. Manually auditing these conditions through the Azure portal doesn't scale and is easy to skip. This tool automates a repeatable identity governance audit against Microsoft Graph so findings are consistent, documented, and reviewable over time.
