@@ -1,12 +1,15 @@
 :root {
-  --critical: #dc2626;
-  --critical-bg: #fee2e2;
-  --high: #ea580c;
-  --high-bg: #ffedd5;
-  --medium: #d97706;
-  --medium-bg: #fef3c7;
-  --low: #6b7280;
-  --low-bg: #f1f5f9;
+  /* Validated for colorblind separation (deutan/protan) — see TECHNICAL.md
+     "HTML/CSS/JS Dashboard" for why; do not swap individual hues without
+     re-checking separation. */
+  --critical: #b91c1c;
+  --critical-bg: rgba(185, 28, 28, 0.12);
+  --high: #b45309;
+  --high-bg: rgba(180, 83, 9, 0.15);
+  --medium: #854d0e;
+  --medium-bg: rgba(133, 77, 14, 0.15);
+  --low: #15803d;
+  --low-bg: rgba(21, 128, 61, 0.12);
   --bg: #f8fafc;
   --card-bg: #ffffff;
   --border: #e2e8f0;
@@ -39,6 +42,14 @@ header {
 header h1 {
   margin: 0;
   font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.brand-icon {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 header .meta {
@@ -148,6 +159,10 @@ main {
   margin-right: 0.35rem;
   font-size: 0.7rem;
 }
+
+.card.critical { border-top: 4px solid var(--critical); }
+.card.high { border-top: 4px solid var(--high); }
+.card.medium { border-top: 4px solid var(--medium); }
 
 .card.critical .value { color: var(--critical); }
 .card.high .value { color: var(--high); }
@@ -342,6 +357,12 @@ tr.detail-row td {
   padding: 2.5rem;
   text-align: center;
   color: var(--text-muted);
+}
+
+.empty-state-icon {
+  display: block;
+  margin: 0 auto 0.75rem;
+  color: var(--border);
 }
 
 .live-form {

@@ -10,7 +10,13 @@
 
 <header>
   <div>
-    <h1>Entra ID Audit Dashboard</h1>
+    <h1>
+      <svg class="brand-icon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M12 2l8 3v6c0 5-3.4 8.4-8 11-4.6-2.6-8-6-8-11V5l8-3z"></path>
+        <path d="M9 12l2 2 4-4"></path>
+      </svg>
+      Entra ID Audit Dashboard
+    </h1>
     <div class="meta">
       Tenant: <span id="meta-tenant">—</span> &middot;
       Generated: <span id="meta-generated">—</span> &middot;
@@ -24,7 +30,7 @@
     <button id="load-sample-btn" class="secondary" type="button">Load Sample Data</button>
     <button id="connect-live-btn" class="live" type="button">Connect Live</button>
     <button id="live-disconnect-btn" class="secondary" type="button" style="display:none;">Disconnect</button>
-    <button id="export-csv-btn" type="button">Export CSV</button>
+    <button id="export-csv-btn" class="secondary" type="button">Export CSV</button>
   </div>
 </header>
 
@@ -86,7 +92,13 @@
         </thead>
         <tbody id="findings-tbody"></tbody>
       </table>
-      <div class="empty-state" id="empty-state" style="display:none;">No findings match the current filters.</div>
+      <div class="empty-state" id="empty-state" style="display:none;">
+        <svg class="empty-state-icon" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <circle cx="10" cy="10" r="6"></circle>
+          <line x1="14.5" y1="14.5" x2="20" y2="20"></line>
+        </svg>
+        <div>No findings match the current filters.</div>
+      </div>
     </div>
   </section>
 </main>
