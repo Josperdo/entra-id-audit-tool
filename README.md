@@ -1,7 +1,7 @@
 # Entra ID Audit Tool
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/Josperdo/entra-id-audit-tool/pester-tests.yml?branch=main&label=tests)](.github/workflows/pester-tests.yml)
-[![License](https://img.shields.io/github/license/Josperdo/entra-id-audit-tool)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/Josperdo/entra-id-audit-tool)](https://github.com/Josperdo/entra-id-audit-tool/commits/main)
 
 Automated identity governance audit for Azure/Entra ID
