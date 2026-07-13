@@ -1,5 +1,9 @@
 # Entra ID Audit Tool
 
+[![Tests](https://img.shields.io/github/actions/workflow/status/Josperdo/entra-id-audit-tool/pester-tests.yml?branch=main&label=tests)](.github/workflows/pester-tests.yml)
+[![License](https://img.shields.io/github/license/Josperdo/entra-id-audit-tool)](LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/Josperdo/entra-id-audit-tool)](https://github.com/Josperdo/entra-id-audit-tool/commits/main)
+
 Automated identity governance audit for Azure/Entra ID
 
 ![Entra ID Audit Dashboard showing findings summary and severity breakdown](docs/dashboard-screenshot.png)
@@ -44,10 +48,6 @@ Instead of running the PowerShell script, the dashboard can authenticate to Entr
 npx serve dashboard
 # open http://localhost:5500 and click "Connect Live"
 ```
-
-## Project Status
-
-**Backend and dashboard complete.** All six audit checks are implemented, both as a PowerShell batch pipeline and as a faithful client-side JS port for Live Mode. Requires a Microsoft 365 / Entra ID tenant and an App Registration with read-only Graph scopes to run live — see [SETUP.md](SETUP.md). The dashboard can be opened locally with sample data for a no-credential demo.
 
 ## Known Limitations
 
