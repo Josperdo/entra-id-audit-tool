@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/Josperdo/entra-id-audit-tool)](https://github.com/Josperdo/entra-id-audit-tool/commits/main)
 
-Automated identity governance audit for Azure/Entra ID
+Automated identity governance audit dashboard for Azure/Entra ID.
 
 ![Entra ID Audit Dashboard showing findings summary and severity breakdown](docs/dashboard-screenshot.png)
 
