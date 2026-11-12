@@ -465,3 +465,29 @@ tr.detail-row td {
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+
+/* Shown when one or more checks did not run, so an incomplete audit can't
+   be mistaken for a clean one. */
+.coverage-notice {
+  background: var(--high-bg);
+  border: 1px solid var(--high);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 0.85rem 1.1rem;
+  margin-bottom: 1.5rem;
+  color: var(--text);
+}
+
+.coverage-notice[hidden] { display: none; }
+
+.coverage-title {
+  font-weight: 600;
+  color: var(--high);
+  margin-bottom: 0.35rem;
+}
+
+.coverage-notice ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+}

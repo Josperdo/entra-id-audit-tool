@@ -20,7 +20,7 @@ jobs:
         shell: pwsh
         run: |
           Import-Module Pester -MinimumVersion 5.0
-          $result = Invoke-Pester -Path tests/AuditChecks.Tests.ps1 -Output Detailed -PassThru
+          $result = Invoke-Pester -Path tests -Output Detailed -PassThru
           if ($result.FailedCount -gt 0) {
             throw "$($result.FailedCount) test(s) failed"
           }

@@ -49,8 +49,8 @@ Two independent paths produce the same report shape and feed the same dashboard.
 - **`GraphAPI.psm1`** — handles authentication (`Connect-MgGraph` or app-only auth) and wraps Graph API requests, including pagination and throttling/retry handling.
 - **`AuditChecks.psm1`** — one function per audit check (see [AUDIT-CHECKS.md](AUDIT-CHECKS.md)). Each function returns a normalized findings array.
 - **`Reporting.psm1`** — merges findings from all checks into a single report object and writes JSON/CSV output.
-- **`audit-config.json`** — tenant-specific settings (thresholds, output paths, which checks to run). Not committed to source control (see [Security.md](Security.md)).
-- **`Invoke-EntraAudit.ps1`** — the entry point. Loads config, authenticates, runs each enabled check in its own `try/catch` (so one check failing doesn't stop the others), and hands the combined findings to `Reporting.psm1`.
+- **`audit-config.json`** — tenant-specific settings (thresholds, CSV output, which checks to run). Validated on load so a typo fails fast with a readable message. Not committed to source control (see [Security.md](Security.md)).
+- **`Invoke-EntraAudit.ps1`** — the entry point. Loads and validates config, authenticates, runs each enabled check in its own `try/catch` (so one check failing doesn't stop the others, but is recorded in `metadata.checksFailed`), and hands the combined findings to `Reporting.psm1`.
 
 ### HTML/CSS/JS Dashboard
 
@@ -66,7 +66,7 @@ Self-contained by design — it should be possible to open `dashboard/index.html
 
 ### Live Dashboard Mode (Browser-Only)
 
-`dashboard/live.js` adds a "Connect Live" alternative to loading a pre-generated report: the browser authenticates directly to Entra ID (via the vendored `msal-browser.min.js`, MSAL's PKCE public-client flow — no client secret) and calls Microsoft Graph itself, running a **faithful port** of the same 6 checks in `AuditChecks.psm1`. "Faithful" is a deliberate constraint, not an oversight — the JS versions intentionally preserve the PowerShell checks' known simplifications (e.g. `privileged-roles` can't distinguish a permanent assignment from a currently-active PIM one; `ca-policy-gaps` has no coverage-gap analysis) so the two artifacts never silently disagree about what counts as a finding for the same tenant. The resulting report is assembled in the same `metadata`/`summary`/`findings` shape and handed to `app.js`'s existing `loadData()` — the same integration point the file-upload and sample-data buttons already use, via a single `window.EntraAuditDashboard.loadData` export.
+`dashboard/live.js` adds a "Connect Live" alternative to loading a pre-generated report: the browser authenticates directly to Entra ID (via the vendored `msal-browser.min.js`, MSAL's PKCE public-client flow — no client secret) and calls Microsoft Graph itself, running a **faithful port** of the same 6 checks in `AuditChecks.psm1`. "Faithful" is a deliberate constraint, not an oversight — the JS versions intentionally keep the PowerShell checks' documented limits (e.g. `privileged-roles` reports *active* assignments because the API can't tell permanent from activated-PIM; `ca-policy-gaps` checks policy state, not coverage) so the two artifacts never silently disagree about what counts as a finding for the same tenant. That parity is checked, not just intended: a headless test feeds both implementations the same fixture and diffs the findings (see Testing). The resulting report is assembled in the same `metadata`/`summary`/`findings` shape and handed to `app.js`'s existing `loadData()` — the same integration point the file-upload and sample-data buttons already use, via a single `window.EntraAuditDashboard.loadData` export.
 
 This is a hard requirement, not a preference: MSAL.js's browser auth needs a real `http(s)://` origin, so Live Mode only works when the dashboard is served by a local static file server — it does not work via `file://`. File-upload and sample-data are unaffected and still need no server.
 
@@ -76,7 +76,13 @@ No automated test exercises the MSAL/OAuth flow itself (see Testing below); it's
 
 ### JSON Data Format
 
-The script writes a JSON report consumed by the dashboard. The schema is defined once both components depend on it directly (see `CLOUD.md` for the data flow contract).
+The script writes a JSON report consumed by the dashboard (reference: `samples/output/sample-data.json`; data-flow contract in `CLOUD.md`). It has three parts:
+
+- `metadata` — tenant, timestamp, tool version, `checksRun`, and `checksFailed` (`[{ checkId, reason }]`). `checksFailed` exists because an audit that silently drops a check looks identical to a clean one; the dashboard shows an "Incomplete audit" banner for any of the six checks missing from `checksRun`.
+- `summary` — totals by severity and by check.
+- `findings` — the 10-field objects built by `New-AuditFinding`.
+
+`samples/output/sample-data.json` is **generated, not hand-written**: `samples/New-SampleData.ps1` runs the real check functions against a fictional Contoso fixture, so the demo can only show findings the code can actually produce. The same JSON is embedded in `app.js` as `SAMPLE_DATA` (a `file://` page can't `fetch` a sibling file).
 
 ## Technology Choices
 
@@ -86,10 +92,12 @@ The script writes a JSON report consumed by the dashboard. The schema is defined
 
 ## Testing
 
-- **Pester** (`tests/AuditChecks.Tests.ps1`) covers the schema contract: `New-AuditFinding` always produces the 10 fields the dashboard expects, rejects invalid severities, and generates unique IDs; `New-AuditReport` correctly aggregates findings by severity and by check, including the zero-findings/zero-checks-run case. Runs automatically on every push/PR to `main` via `.github/workflows/pester-tests.yml` — the README's "Tests" badge reflects the real, current state of this suite, not a manually-run snapshot.
-- **Dashboard rendering** is verified against both `samples/output/sample-data.json` (fabricated demo data, safe to commit) and a real report generated end-to-end against the M365 dev tenant — confirming the schema `Reporting.psm1` produces is actually consumable by the dashboard, not just schema-valid in isolation.
-- The six `Get-*Findings` check functions themselves are not unit tested — doing so would require mocking Microsoft Graph responses. They're validated by running against a real tenant instead (see [README.md](README.md#known-limitations) for current coverage).
-- **Live Mode** has no automated coverage of the MSAL/OAuth flow itself (mocking a full PKCE redirect exchange isn't a good cost/benefit fit for this repo's zero-build-step scope) — verified manually via `tests/LiveMode-Manual-Checklist.md` against the real M365 dev tenant, same as the PowerShell backend's own verification. Because each of the 6 JS check functions and the orchestrator take their Graph-calling function as an injected parameter rather than a global, they are cheaply unit-testable against a stubbed response — a reasonable fast-follow, not yet done, consistent with the PS check functions' own untested status above.
+- **Schema contract** (`tests/AuditChecks.Tests.ps1`): `New-AuditFinding` always produces the 10 fields the dashboard expects, rejects invalid severities, and generates unique IDs; `New-AuditReport` aggregates correctly, including the zero-findings case.
+- **Check behaviour** (`tests/Checks.Tests.ps1`): because every check reaches Graph only through `Invoke-GraphQuery`, a single Pester `Mock` inside the `AuditChecks` module feeds each check canned Graph responses, with no tenant, network, or Graph SDK needed. The fixtures cover the edge cases that matter: `signInActivity` null or missing, disabled accounts, guests vs. members, group principals in role assignments, null credential arrays, an empty CA policy list. `Invoke-GraphQuery` itself is tested for pagination, 429 retry with `Retry-After`, giving up after `MaxRetries`, and surfacing non-HTTP errors. Several of these are regression tests for real StrictMode bugs found in review, and they were confirmed to fail against the pre-fix code.
+- Both suites run on every push/PR to `main` via `.github/workflows/pester-tests.yml` (33 tests).
+- **Dashboard + PS/JS parity** was verified with a headless jsdom script. It loads `index.html`, stubs MSAL and `fetch`, drives Live Mode with the same fixture `New-SampleData.ps1` uses, and asserts the JS findings are identical to the PowerShell-generated sample. It also checks the incomplete-audit banner and the CSV formula-injection guard. This is run locally rather than in CI, to keep the repo free of an npm toolchain.
+- **End-to-end:** run against an M365 developer tenant. That tenant has no Entra ID P1/P2, so only `privileged-roles` and `stale-service-principals` could run there. The licence-gated checks are covered by the mocked tests above, not by a live tenant.
+- **Live Mode sign-in** (the MSAL/PKCE redirect itself) is verified manually via `tests/LiveMode-Manual-Checklist.md`.
 
 ## Scope and Limitations
 

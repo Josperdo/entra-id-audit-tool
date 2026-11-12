@@ -8,10 +8,119 @@
     dashboard expects (see samples/output/sample-data.json for the reference
     schema). See AUDIT-CHECKS.md for the Graph endpoint, severity, and
     remediation guidance behind each check.
+
+    All Graph access goes through Invoke-GraphQuery, which is also the single
+    seam the Pester tests mock to exercise these checks without a tenant.
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+function Get-OptionalProperty {
+    # Graph omits or nulls properties freely (e.g. signInActivity for a user
+    # who has never signed in). Under StrictMode, dotting into a missing
+    # property throws, so every "may not be there" read goes through here.
+    param($InputObject, [string]$Name)
+
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject[$Name] }
+    $prop = $InputObject.PSObject.Properties[$Name]
+    if ($prop) { return $prop.Value }
+    return $null
+}
+
+function ConvertTo-UtcDateTime {
+    # Graph timestamps are ISO 8601 UTC. Depending on how they were
+    # deserialized they arrive as strings or as DateTime (sometimes converted
+    # to local time), so normalise to UTC before comparing against cutoffs.
+    param($Value)
+
+    if ($null -eq $Value -or "$Value" -eq '') { return $null }
+    if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+    return [datetime]::Parse(
+        [string]$Value,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
+}
+
+function Get-InactiveUserFindings {
+    # Shared implementation behind the stale-account and guest-review checks:
+    # same query, same "never / not recently signed in" logic, different
+    # population and wording.
+    param(
+        [Parameter(Mandatory)][ValidateSet('Member', 'Guest')][string]$UserType,
+        [Parameter(Mandatory)][int]$ThresholdDays
+    )
+
+    $isGuest = $UserType -eq 'Guest'
+    $meta = if ($isGuest) {
+        @{ CheckId = 'guest-review'; CheckName = 'Guest Account Review'; ObjectType = 'Guest'; Noun = 'Guest account' }
+    } else {
+        @{ CheckId = 'stale-accounts'; CheckName = 'Stale/Inactive Accounts'; ObjectType = 'User'; Noun = 'Account' }
+    }
+
+    $findings = [System.Collections.Generic.List[object]]::new()
+    $now      = (Get-Date).ToUniversalTime()
+    $cutoff   = $now.AddDays(-$ThresholdDays)
+
+    $users = Invoke-GraphQuery -Uri "/users?`$select=id,userPrincipalName,displayName,accountEnabled,userType,signInActivity"
+
+    foreach ($user in $users) {
+        # Treat a missing userType as Member, matching Entra's default.
+        $type = Get-OptionalProperty $user 'userType'
+        $type = if ($type) { $type } else { 'Member' }
+        if ($type -ne $UserType) { continue }
+        if ((Get-OptionalProperty $user 'accountEnabled') -ne $true) { continue }
+
+        $upn         = Get-OptionalProperty $user 'userPrincipalName'
+        $displayName = Get-OptionalProperty $user 'displayName'
+        $lastSignIn  = ConvertTo-UtcDateTime (Get-OptionalProperty (Get-OptionalProperty $user 'signInActivity') 'lastSignInDateTime')
+
+        if ($null -eq $lastSignIn) {
+            $remediation = if ($isGuest) {
+                'Confirm whether this guest still requires access. If not, remove the guest account to reduce the external attack surface.'
+            } else {
+                'Review whether this account is still needed. If not, disable or delete it in Entra ID.'
+            }
+            $findings.Add((New-AuditFinding `
+                -CheckId        $meta.CheckId `
+                -CheckName      $meta.CheckName `
+                -Severity       'Medium' `
+                -ObjectType     $meta.ObjectType `
+                -AffectedObject $upn `
+                -Title          "$($meta.Noun) has never signed in" `
+                -Description    "$displayName ($upn) is enabled but has no recorded sign-in activity." `
+                -Remediation    $remediation))
+        }
+        elseif ($lastSignIn -lt $cutoff) {
+            $daysSince   = [int][Math]::Floor(($now - $lastSignIn).TotalDays)
+            $remediation = if ($isGuest) {
+                'Review whether this guest still requires access. If access is no longer needed, remove the guest account.'
+            } else {
+                'Review whether this account is still needed. If active, confirm with the user. If stale, disable or delete it in Entra ID.'
+            }
+            $findings.Add((New-AuditFinding `
+                -CheckId        $meta.CheckId `
+                -CheckName      $meta.CheckName `
+                -Severity       'Medium' `
+                -ObjectType     $meta.ObjectType `
+                -AffectedObject $upn `
+                -Title          "$($meta.Noun) inactive for $daysSince days" `
+                -Description    "$displayName ($upn) last signed in on $($lastSignIn.ToString('yyyy-MM-dd')) ($daysSince days ago). Threshold: $ThresholdDays days." `
+                -Remediation    $remediation))
+        }
+    }
+
+    return $findings.ToArray()
+}
+
+# ---------------------------------------------------------------------------
+# Public functions
+# ---------------------------------------------------------------------------
 
 function New-AuditFinding {
     <#
@@ -30,7 +139,7 @@ function New-AuditFinding {
         One of Critical, High, Medium, Low.
     .PARAMETER ObjectType
         The Entra object type the finding is about, e.g. User, Guest,
-        ServicePrincipal, Group, Policy.
+        Group, ServicePrincipal, Application, Policy.
     .PARAMETER AffectedObject
         A human-identifiable reference to the object (UPN, display name, etc).
     .PARAMETER Title
@@ -48,12 +157,14 @@ function New-AuditFinding {
         [Parameter(Mandatory)][string]$CheckName,
         [Parameter(Mandatory)][ValidateSet('Critical', 'High', 'Medium', 'Low')][string]$Severity,
         [Parameter(Mandatory)][string]$ObjectType,
-        [Parameter(Mandatory)][string]$AffectedObject,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$AffectedObject,
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][string]$Description,
         [Parameter(Mandatory)][string]$Remediation,
         [string]$Id = ([guid]::NewGuid().ToString())
     )
+
+    if ([string]::IsNullOrWhiteSpace($AffectedObject)) { $AffectedObject = '(unnamed object)' }
 
     [PSCustomObject]@{
         id             = $Id
@@ -74,51 +185,17 @@ function Get-StaleAccountFindings {
     .SYNOPSIS
         Check 1: Stale/Inactive Accounts. See AUDIT-CHECKS.md section 1.
     .DESCRIPTION
-        Queries all enabled users and flags anyone whose lastSignInDateTime is
-        older than thresholds.staleAccountDays, or who has never signed in.
-        Requires AuditLog.Read.All scope for the signInActivity field.
+        Flags enabled member (non-guest) users whose lastSignInDateTime is older
+        than thresholds.staleAccountDays, or who have never signed in. Guests are
+        covered separately by Get-GuestReviewFindings so they aren't double-counted.
+        Requires AuditLog.Read.All scope and an Entra ID P1/P2 licence for signInActivity.
     .PARAMETER Config
         The parsed audit-config.json object.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][PSCustomObject]$Config)
 
-    $findings = [System.Collections.Generic.List[object]]::new()
-    $cutoff   = (Get-Date).ToUniversalTime().AddDays(-$Config.thresholds.staleAccountDays)
-
-    $users = Invoke-GraphQuery -Uri "/users?`$select=id,userPrincipalName,displayName,accountEnabled,signInActivity"
-
-    foreach ($user in $users) {
-        if ($user.accountEnabled -ne $true) { continue }
-
-        $lastSignIn = $user.signInActivity.lastSignInDateTime
-
-        if ($null -eq $lastSignIn) {
-            $findings.Add((New-AuditFinding `
-                -CheckId        'stale-accounts' `
-                -CheckName      'Stale/Inactive Accounts' `
-                -Severity       'Medium' `
-                -ObjectType     'User' `
-                -AffectedObject $user.userPrincipalName `
-                -Title          'Account has never signed in' `
-                -Description    "$($user.displayName) ($($user.userPrincipalName)) has no recorded sign-in activity." `
-                -Remediation    'Review whether this account is still needed. If not, disable or delete it in Entra ID.'))
-        }
-        elseif ([datetime]$lastSignIn -lt $cutoff) {
-            $daysSince = [int]((Get-Date).ToUniversalTime() - [datetime]$lastSignIn).TotalDays
-            $findings.Add((New-AuditFinding `
-                -CheckId        'stale-accounts' `
-                -CheckName      'Stale/Inactive Accounts' `
-                -Severity       'Medium' `
-                -ObjectType     'User' `
-                -AffectedObject $user.userPrincipalName `
-                -Title          "Account inactive for $daysSince days" `
-                -Description    "$($user.displayName) ($($user.userPrincipalName)) last signed in on $([datetime]$lastSignIn | Get-Date -Format 'yyyy-MM-dd') ($daysSince days ago). Threshold: $($Config.thresholds.staleAccountDays) days." `
-                -Remediation    'Review whether this account is still needed. If active, confirm with the user. If stale, disable or delete it in Entra ID.'))
-        }
-    }
-
-    return $findings.ToArray()
+    Get-InactiveUserFindings -UserType Member -ThresholdDays $Config.thresholds.staleAccountDays
 }
 
 function Get-NoMfaFindings {
@@ -127,8 +204,8 @@ function Get-NoMfaFindings {
         Check 2: Users Without MFA. See AUDIT-CHECKS.md section 2.
     .DESCRIPTION
         Queries the authentication methods registration report and flags any
-        user who has not registered an MFA method.
-        Requires AuditLog.Read.All or UserAuthenticationMethod.Read.All scope.
+        user who has not registered an MFA-capable method.
+        Requires AuditLog.Read.All scope and an Entra ID P1/P2 licence.
     .PARAMETER Config
         The parsed audit-config.json object.
     #>
@@ -137,20 +214,21 @@ function Get-NoMfaFindings {
 
     $findings = [System.Collections.Generic.List[object]]::new()
 
-    $users = Invoke-GraphQuery -Uri '/reports/authenticationMethods/userRegistrationDetails'
+    $records = Invoke-GraphQuery -Uri '/reports/authenticationMethods/userRegistrationDetails'
 
-    foreach ($user in $users) {
-        if ($user.isMfaRegistered -ne $true) {
-            $findings.Add((New-AuditFinding `
-                -CheckId        'no-mfa' `
-                -CheckName      'Users Without MFA' `
-                -Severity       'Critical' `
-                -ObjectType     'User' `
-                -AffectedObject $user.userPrincipalName `
-                -Title          'User has no MFA method registered' `
-                -Description    "$($user.userPrincipalName) has not registered any MFA authentication method and is vulnerable to password-only attacks." `
-                -Remediation    'Require the user to register an MFA method via aka.ms/mfasetup. Enforce registration through a Conditional Access policy targeting all users.'))
-        }
+    foreach ($record in $records) {
+        if ((Get-OptionalProperty $record 'isMfaRegistered') -eq $true) { continue }
+
+        $upn = Get-OptionalProperty $record 'userPrincipalName'
+        $findings.Add((New-AuditFinding `
+            -CheckId        'no-mfa' `
+            -CheckName      'Users Without MFA' `
+            -Severity       'Critical' `
+            -ObjectType     'User' `
+            -AffectedObject $upn `
+            -Title          'User has no MFA method registered' `
+            -Description    "$upn has not registered any MFA authentication method and is vulnerable to password-only attacks." `
+            -Remediation    'Require the user to register an MFA method via aka.ms/mfasetup. Enforce registration through a Conditional Access policy targeting all users.'))
     }
 
     return $findings.ToArray()
@@ -161,52 +239,16 @@ function Get-GuestReviewFindings {
     .SYNOPSIS
         Check 3: Guest Account Review. See AUDIT-CHECKS.md section 3.
     .DESCRIPTION
-        Flags guest accounts that have never signed in (invite accepted but
+        Flags enabled guest accounts that have never signed in (invited but
         unused) or that have not signed in within thresholds.staleGuestDays.
-        Requires AuditLog.Read.All scope for signInActivity.
+        Requires AuditLog.Read.All scope and an Entra ID P1/P2 licence for signInActivity.
     .PARAMETER Config
         The parsed audit-config.json object.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][PSCustomObject]$Config)
 
-    $findings = [System.Collections.Generic.List[object]]::new()
-    $cutoff   = (Get-Date).ToUniversalTime().AddDays(-$Config.thresholds.staleGuestDays)
-
-    $users = Invoke-GraphQuery -Uri "/users?`$select=id,userPrincipalName,displayName,accountEnabled,userType,signInActivity"
-
-    foreach ($user in $users) {
-        if ($user.userType -ne 'Guest') { continue }
-        if ($user.accountEnabled -ne $true) { continue }
-
-        $lastSignIn = $user.signInActivity.lastSignInDateTime
-
-        if ($null -eq $lastSignIn) {
-            $findings.Add((New-AuditFinding `
-                -CheckId        'guest-review' `
-                -CheckName      'Guest Account Review' `
-                -Severity       'Medium' `
-                -ObjectType     'Guest' `
-                -AffectedObject $user.userPrincipalName `
-                -Title          'Guest account has never signed in' `
-                -Description    "$($user.displayName) ($($user.userPrincipalName)) is an enabled guest account with no recorded sign-in activity." `
-                -Remediation    'Confirm whether this guest still requires access. If not, remove the guest account to reduce the external attack surface.'))
-        }
-        elseif ([datetime]$lastSignIn -lt $cutoff) {
-            $daysSince = [int]((Get-Date).ToUniversalTime() - [datetime]$lastSignIn).TotalDays
-            $findings.Add((New-AuditFinding `
-                -CheckId        'guest-review' `
-                -CheckName      'Guest Account Review' `
-                -Severity       'Medium' `
-                -ObjectType     'Guest' `
-                -AffectedObject $user.userPrincipalName `
-                -Title          "Guest account inactive for $daysSince days" `
-                -Description    "$($user.displayName) ($($user.userPrincipalName)) last signed in on $([datetime]$lastSignIn | Get-Date -Format 'yyyy-MM-dd') ($daysSince days ago). Threshold: $($Config.thresholds.staleGuestDays) days." `
-                -Remediation    'Review whether this guest still requires access. If access is no longer needed, remove the guest account.'))
-        }
-    }
-
-    return $findings.ToArray()
+    Get-InactiveUserFindings -UserType Guest -ThresholdDays $Config.thresholds.staleGuestDays
 }
 
 function Get-PrivilegedRoleFindings {
@@ -214,9 +256,14 @@ function Get-PrivilegedRoleFindings {
     .SYNOPSIS
         Check 4: Privileged Role Assignments. See AUDIT-CHECKS.md section 4.
     .DESCRIPTION
-        Flags permanent (non-PIM) assignments to high-privilege Entra ID roles.
-        Permanent assignments are always active; PIM-eligible assignments require
-        explicit activation and are time-limited — making them significantly safer.
+        Flags every principal holding an active assignment to one of seven
+        high-privilege built-in Entra ID roles.
+
+        Limitation: /roleManagement/directory/roleAssignments returns all
+        assignments active at the time of the scan. That includes standing
+        (permanent) assignments AND PIM-eligible roles that happen to be
+        activated right now, so the finding says "active", not "permanent".
+        Distinguishing the two needs the PIM schedule APIs (Entra ID P2).
         Requires RoleManagement.Read.Directory scope.
     .PARAMETER Config
         The parsed audit-config.json object.
@@ -237,30 +284,39 @@ function Get-PrivilegedRoleFindings {
         'b1be1c3e-b65d-4f19-8427-f6fa0d97feb9' = 'Conditional Access Administrator'
     }
 
+    $principalTypes = @{
+        '#microsoft.graph.user'             = 'User'
+        '#microsoft.graph.group'            = 'Group'
+        '#microsoft.graph.servicePrincipal' = 'ServicePrincipal'
+    }
+
     # Graph only allows expanding one navigation property per request, and we
     # already know the role names above, so only principal needs expanding.
     $assignments = Invoke-GraphQuery -Uri "/roleManagement/directory/roleAssignments?`$expand=principal"
 
     foreach ($assignment in $assignments) {
-        if (-not $highPrivilegeRoles.Contains($assignment.roleDefinitionId)) { continue }
-        if ($null -eq $assignment.principal) { continue }
+        $roleId = Get-OptionalProperty $assignment 'roleDefinitionId'
+        if (-not $roleId -or -not $highPrivilegeRoles.Contains($roleId)) { continue }
 
-        $roleName       = $highPrivilegeRoles[$assignment.roleDefinitionId]
-        $affectedObject = if ($assignment.principal.userPrincipalName) {
-            $assignment.principal.userPrincipalName
-        } else {
-            $assignment.principal.displayName
-        }
+        $principal = Get-OptionalProperty $assignment 'principal'
+        if ($null -eq $principal) { continue }
+
+        $roleName   = $highPrivilegeRoles[$roleId]
+        $odataType  = Get-OptionalProperty $principal '@odata.type'
+        $objectType = if ($odataType -and $principalTypes.ContainsKey($odataType)) { $principalTypes[$odataType] } else { 'User' }
+
+        $upn            = Get-OptionalProperty $principal 'userPrincipalName'
+        $affectedObject = if ($upn) { $upn } else { Get-OptionalProperty $principal 'displayName' }
 
         $findings.Add((New-AuditFinding `
             -CheckId        'privileged-roles' `
             -CheckName      'Privileged Role Assignments' `
             -Severity       'Critical' `
-            -ObjectType     'User' `
+            -ObjectType     $objectType `
             -AffectedObject $affectedObject `
-            -Title          "Permanent assignment to $roleName" `
-            -Description    "$affectedObject holds a permanent (non-PIM) assignment to '$roleName'. Permanent assignments are always active, increasing exposure if the account is compromised." `
-            -Remediation    "Convert to a PIM-eligible assignment in Entra ID Privileged Identity Management. The user can then activate the role on-demand with justification and time limits."))
+            -Title          "Active assignment to $roleName" `
+            -Description    "$affectedObject ($objectType) holds an active assignment to '$roleName'. This may be a standing assignment or a PIM role activated at scan time; standing assignments are always on, increasing exposure if the principal is compromised." `
+            -Remediation    "Confirm in Privileged Identity Management whether this assignment is permanent. If so, convert it to PIM-eligible so the role is activated on demand with justification and time limits. Reserve permanent assignments for break-glass accounts."))
     }
 
     return $findings.ToArray()
@@ -269,12 +325,14 @@ function Get-PrivilegedRoleFindings {
 function Get-StaleServicePrincipalFindings {
     <#
     .SYNOPSIS
-        Check 5: Stale/Orphaned Service Principals & App Registrations.
-        See AUDIT-CHECKS.md section 5.
+        Check 5: App Registration Credential Expiry. See AUDIT-CHECKS.md section 5.
     .DESCRIPTION
         Flags app registrations with credentials (client secrets or certificates)
         that have already expired or will expire within thresholds.secretExpiryWarningDays.
-        Expired credentials can cause silent outages; expiring ones need proactive rotation.
+        Expired credentials are leftover clutter (and often a sign the app is
+        abandoned); expiring ones need proactive rotation to avoid outages.
+        The checkId keeps its original 'stale-service-principals' slug for
+        config/report compatibility.
         Requires Application.Read.All scope.
     .PARAMETER Config
         The parsed audit-config.json object.
@@ -282,47 +340,52 @@ function Get-StaleServicePrincipalFindings {
     [CmdletBinding()]
     param([Parameter(Mandatory)][PSCustomObject]$Config)
 
-    $findings    = [System.Collections.Generic.List[object]]::new()
-    $now         = (Get-Date).ToUniversalTime()
-    $warnCutoff  = $now.AddDays($Config.thresholds.secretExpiryWarningDays)
+    $findings   = [System.Collections.Generic.List[object]]::new()
+    $warnDays   = $Config.thresholds.secretExpiryWarningDays
+    $now        = (Get-Date).ToUniversalTime()
+    $warnCutoff = $now.AddDays($warnDays)
+    $checkName  = 'App Registration Credential Expiry'
 
     $apps = Invoke-GraphQuery -Uri "/applications?`$select=id,appId,displayName,passwordCredentials,keyCredentials"
 
     foreach ($app in $apps) {
+        $appName  = Get-OptionalProperty $app 'displayName'
         $allCreds = @(
-            ($app.passwordCredentials | ForEach-Object { $_ | Add-Member -NotePropertyName credType -NotePropertyValue 'Secret' -PassThru })
-            ($app.keyCredentials      | ForEach-Object { $_ | Add-Member -NotePropertyName credType -NotePropertyValue 'Certificate' -PassThru })
-        ) | Where-Object { $null -ne $_ }
+            foreach ($c in @(Get-OptionalProperty $app 'passwordCredentials')) { if ($c) { @{ Cred = $c; Type = 'Secret' } } }
+            foreach ($c in @(Get-OptionalProperty $app 'keyCredentials'))      { if ($c) { @{ Cred = $c; Type = 'Certificate' } } }
+        )
 
-        foreach ($cred in $allCreds) {
-            if ($null -eq $cred.endDateTime) { continue }
+        foreach ($entry in $allCreds) {
+            $expiry = ConvertTo-UtcDateTime (Get-OptionalProperty $entry.Cred 'endDateTime')
+            if ($null -eq $expiry) { continue }
 
-            $expiry   = [datetime]$cred.endDateTime
-            $credName = if ([string]::IsNullOrWhiteSpace($cred.displayName)) { $cred.keyId } else { $cred.displayName }
+            $credType = $entry.Type
+            $credName = Get-OptionalProperty $entry.Cred 'displayName'
+            if ([string]::IsNullOrWhiteSpace($credName)) { $credName = Get-OptionalProperty $entry.Cred 'keyId' }
 
             if ($expiry -lt $now) {
-                $daysPast = [int]($now - $expiry).TotalDays
+                $daysPast = [int][Math]::Floor(($now - $expiry).TotalDays)
                 $findings.Add((New-AuditFinding `
                     -CheckId        'stale-service-principals' `
-                    -CheckName      'Stale/Orphaned Service Principals & App Registrations' `
+                    -CheckName      $checkName `
                     -Severity       'High' `
-                    -ObjectType     'ServicePrincipal' `
-                    -AffectedObject $app.displayName `
-                    -Title          "$($cred.credType) '$credName' expired $daysPast days ago" `
-                    -Description    "App registration '$($app.displayName)' has an expired $($cred.credType.ToLower()) ('$credName') that expired on $($expiry | Get-Date -Format 'yyyy-MM-dd'). Any service using this credential is likely failing silently." `
-                    -Remediation    "Rotate the credential in the App Registration and update the consuming service. Remove the expired credential once the new one is confirmed working."))
+                    -ObjectType     'Application' `
+                    -AffectedObject $appName `
+                    -Title          "$credType '$credName' expired $daysPast days ago" `
+                    -Description    "App registration '$appName' has an expired $($credType.ToLower()) ('$credName') that expired on $($expiry.ToString('yyyy-MM-dd')). If the app is still in use it is likely failing; if not, the registration may be abandoned." `
+                    -Remediation    'Confirm whether the app is still in use. If it is, rotate the credential and update the consuming service. If not, remove the app registration. Either way, delete the expired credential.'))
             }
             elseif ($expiry -lt $warnCutoff) {
-                $daysLeft = [int]($expiry - $now).TotalDays
+                $daysLeft = [int][Math]::Ceiling(($expiry - $now).TotalDays)
                 $findings.Add((New-AuditFinding `
                     -CheckId        'stale-service-principals' `
-                    -CheckName      'Stale/Orphaned Service Principals & App Registrations' `
+                    -CheckName      $checkName `
                     -Severity       'Medium' `
-                    -ObjectType     'ServicePrincipal' `
-                    -AffectedObject $app.displayName `
-                    -Title          "$($cred.credType) '$credName' expiring in $daysLeft days" `
-                    -Description    "App registration '$($app.displayName)' has a $($cred.credType.ToLower()) ('$credName') expiring on $($expiry | Get-Date -Format 'yyyy-MM-dd') ($daysLeft days). Threshold: $($Config.thresholds.secretExpiryWarningDays) days." `
-                    -Remediation    "Rotate the credential before it expires to avoid service disruption. Update the consuming service and remove the old credential."))
+                    -ObjectType     'Application' `
+                    -AffectedObject $appName `
+                    -Title          "$credType '$credName' expiring in $daysLeft days" `
+                    -Description    "App registration '$appName' has a $($credType.ToLower()) ('$credName') expiring on $($expiry.ToString('yyyy-MM-dd')) ($daysLeft days). Threshold: $warnDays days." `
+                    -Remediation    'Rotate the credential before it expires to avoid service disruption. Update the consuming service and remove the old credential.'))
             }
         }
     }
@@ -333,56 +396,61 @@ function Get-StaleServicePrincipalFindings {
 function Get-ConditionalAccessGapFindings {
     <#
     .SYNOPSIS
-        Check 6: Conditional Access Policy Gaps. See AUDIT-CHECKS.md section 6.
+        Check 6: Conditional Access Policy State. See AUDIT-CHECKS.md section 6.
     .DESCRIPTION
         Flags CA policies that are disabled (not enforcing) or in report-only mode
-        (logging but not enforcing). Also flags tenants with no CA policies at all.
-        Requires Policy.Read.All scope.
+        (logging but not enforcing), and tenants with no CA policies at all.
+        Does not analyse user/group coverage or exclusions.
+        Requires Policy.Read.All scope and an Entra ID P1/P2 licence.
     .PARAMETER Config
         The parsed audit-config.json object.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][PSCustomObject]$Config)
 
-    $findings = [System.Collections.Generic.List[object]]::new()
+    $findings  = [System.Collections.Generic.List[object]]::new()
+    $checkName = 'Conditional Access Policy Gaps'
 
-    $policies = Invoke-GraphQuery -Uri '/identity/conditionalAccess/policies'
+    # Invoke-GraphQuery returns its List as a single object (return ,$list),
+    # so @(...) would wrap an empty list into a 1-element array. Enumerate it.
+    $policies = @(foreach ($p in (Invoke-GraphQuery -Uri '/identity/conditionalAccess/policies')) { $p })
 
     if ($policies.Count -eq 0) {
         $findings.Add((New-AuditFinding `
             -CheckId        'ca-policy-gaps' `
-            -CheckName      'Conditional Access Policy Gaps' `
+            -CheckName      $checkName `
             -Severity       'High' `
             -ObjectType     'Policy' `
             -AffectedObject 'Tenant' `
             -Title          'No Conditional Access policies found' `
-            -Description    'No Conditional Access policies are configured in this tenant. All users and applications can authenticate without any additional access controls beyond username and password.' `
-            -Remediation    'Create baseline CA policies: require MFA for all users, block legacy authentication protocols, and consider restricting access from high-risk locations or sign-in risk levels.'))
+            -Description    'No Conditional Access policies are configured in this tenant. Unless Security Defaults are enabled, users can authenticate with no controls beyond username and password.' `
+            -Remediation    'Create baseline CA policies: require MFA for all users, block legacy authentication protocols, and consider restricting access by sign-in risk or location.'))
         return $findings.ToArray()
     }
 
     foreach ($policy in $policies) {
-        switch ($policy.state) {
+        $name = Get-OptionalProperty $policy 'displayName'
+        switch (Get-OptionalProperty $policy 'state') {
             'disabled' {
                 $findings.Add((New-AuditFinding `
                     -CheckId        'ca-policy-gaps' `
-                    -CheckName      'Conditional Access Policy Gaps' `
+                    -CheckName      $checkName `
                     -Severity       'High' `
                     -ObjectType     'Policy' `
-                    -AffectedObject $policy.displayName `
-                    -Title          "CA policy is disabled: $($policy.displayName)" `
-                    -Description    "The Conditional Access policy '$($policy.displayName)' exists but is disabled and not enforcing any controls. It was likely created with intent but never enabled, or was turned off." `
+                    -AffectedObject $name `
+                    -Title          "CA policy is disabled: $name" `
+                    -Description    "The Conditional Access policy '$name' exists but is disabled and not enforcing any controls." `
                     -Remediation    'Review the policy and re-enable it if it is still needed. If it is no longer relevant, delete it to reduce confusion.'))
             }
             'enabledForReportingButNotEnforcing' {
                 $findings.Add((New-AuditFinding `
                     -CheckId        'ca-policy-gaps' `
-                    -CheckName      'Conditional Access Policy Gaps' `
+                    -CheckName      $checkName `
                     -Severity       'Medium' `
                     -ObjectType     'Policy' `
-                    -AffectedObject $policy.displayName `
-                    -Title          "CA policy in report-only mode: $($policy.displayName)" `
-                    -Description    "The Conditional Access policy '$($policy.displayName)' is in report-only mode. It logs what it would enforce but is not blocking or requiring anything." `
+                    -AffectedObject $name `
+                    -Title          "CA policy in report-only mode: $name" `
+                    -Description    "The Conditional Access policy '$name' is in report-only mode. It logs what it would enforce but is not blocking or requiring anything." `
                     -Remediation    "Review the sign-in logs to assess the policy's impact. Once comfortable with the results, switch the policy state from report-only to enabled."))
             }
         }

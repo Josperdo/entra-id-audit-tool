@@ -6,7 +6,7 @@ This document covers how the Entra ID Audit Tool handles authentication, credent
 
 The tool supports two auth modes, selected via `authMode` in `audit-config.json`, both branching from a single function (`Connect-EntraAudit` in `GraphAPI.psm1`) so the auth logic isn't scattered through the codebase:
 
-- **Delegated** — interactive browser sign-in via `Connect-MgGraph -UseDeviceAuthentication`. Intended for ad-hoc/manual runs where a human is present to authenticate.
+- **Delegated** — interactive browser sign-in via `Connect-MgGraph -Scopes`. Intended for ad-hoc/manual runs where a human is present to authenticate. Device-code flow (`-UseDeviceAuthentication`) is deliberately avoided: it's a well-known phishing technique, and many tenants block it with Conditional Access, so a security tool shouldn't depend on it.
 - **App-only** — unattended auth via a registered App Registration and a certificate thumbprint (`Connect-MgGraph -ClientId -CertificateThumbprint`). Intended for scheduled/unattended runs. Certificate-based auth is used instead of a client secret, since certificates are harder to accidentally leak (no plaintext secret string to paste into a config file or log) and don't need periodic manual rotation the way secrets do.
 
 Both modes request the same five Graph scopes, and all five are **read-only**:
@@ -17,7 +17,7 @@ Both modes request the same five Graph scopes, and all five are **read-only**:
 | `AuditLog.Read.All` | Sign-in activity, MFA registration report |
 | `Policy.Read.All` | Conditional Access policy gaps |
 | `RoleManagement.Read.Directory` | Privileged role assignments |
-| `Application.Read.All` | Stale service principal / app credential check |
+| `Application.Read.All` | App registration credential expiry check |
 
 The tool has no write scopes and cannot modify directory data, roles, policies, or credentials — it audits and reports only.
 
@@ -53,9 +53,14 @@ Graph request to 'https://graph.microsoft.com/v1.0/users?...' failed: Response s
 
 This is a deliberate trade-off: raw Graph error payloads can contain tenant-specific detail, and this tool's console output/warnings are the kind of thing that ends up in a screenshot or a shared terminal log during a review. The cost is that diagnosing *why* a specific check failed (a licensing gap vs. a missing consent vs. a malformed query — all of which look identical at the "BadRequest"/"Forbidden" level) requires re-running the failing query directly with `Invoke-MgGraphRequest` to see the underlying `error.code`/`error.message`. That's an accepted trade-off for a tool whose primary audience is a compliance review, not interactive debugging.
 
-Throttling (HTTP 429/503) is retried automatically with exponential backoff, honoring the `Retry-After` header when Graph provides one, and only surfaces as a `Write-Warning` if retries are exhausted — a transient throttle doesn't fail the whole check.
+Throttling (HTTP 429/503) is retried automatically with exponential backoff, honoring the `Retry-After` header when Graph provides one. Each retry logs a `Write-Warning`, and the request only fails once `MaxRetries` is exhausted, so a transient throttle doesn't fail the whole check. Errors that carry no HTTP response at all (DNS, TLS, auth) are re-thrown with their original message, not masked.
 
-Each of the six audit checks runs independently in its own `try/catch` in `Invoke-EntraAudit.ps1`; one check failing (e.g. due to a licensing gap — see [README.md](README.md#known-limitations)) doesn't stop the others from running or block the report from being generated.
+Each of the six audit checks runs independently in its own `try/catch` in `Invoke-EntraAudit.ps1`. One check failing (e.g. due to a licensing gap — see [README.md](README.md#known-limitations)) doesn't stop the others or block the report. It **is** recorded in the report's `metadata.checksFailed` with a short, generic reason, and the dashboard shows an "Incomplete audit" banner. For an audit tool, a check that silently didn't run is worse than one that failed loudly, because it reads as a clean result.
+
+## Output Safety
+
+- **Dashboard rendering:** every tenant-sourced string (display names, UPNs, app and policy names) is inserted with `textContent`, never `innerHTML`. Those values can be attacker-controlled. By default any user can register an app or set their own display name, so HTML rendering would be a stored-XSS path into the reviewer's browser.
+- **CSV export (both PowerShell and dashboard):** cells beginning with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with `'` so spreadsheet apps treat them as text, not formulas (OWASP CSV-injection guidance). The JSON report is left untouched.
 
 `dashboard/live.js`'s `graphQuery` helper mirrors this posture in the browser: failures throw a generic message the same shape as above, with the Graph `error.code` attached as a separate (non-message) property rather than folded into the displayed text — enough for the live-status panel to detect and label a licensing-gap skip (`Authentication_RequestFromNonPremiumTenantOrB2CTenant`) without surfacing the raw error body. `runLiveAudit` isolates each of the 6 checks the same way `Invoke-EntraAudit.ps1` does — one failing never blocks the other 5.
 
@@ -64,7 +69,7 @@ Each of the six audit checks runs independently in its own `try/catch` in `Invok
 - `reports/` is gitignored. Every report contains real tenant identity data (user principal names, role assignments, app registration details) and must never be committed.
 - Each run writes a new timestamped file (`audit-report-<UTC timestamp>.json`) rather than overwriting the previous one, so consecutive runs don't silently destroy prior findings.
 - There is currently no automated retention/cleanup policy — old reports accumulate in `reports/` until manually deleted. For a real deployment, this would need an explicit retention window (see Known Gaps below).
-- `samples/output/sample-data.json` is explicitly fabricated demo data (not a real tenant export) and is the one JSON file allowed past the `.gitignore` rule, specifically so the dashboard can be demoed without any tenant access.
+- `samples/output/sample-data.json` is fictional demo data (generated from a made-up Contoso fixture by `samples/New-SampleData.ps1`, not a real tenant export) and is the one JSON file allowed past the `.gitignore` rule, specifically so the dashboard can be demoed without any tenant access.
 
 ## Known Gaps
 
@@ -73,6 +78,6 @@ Honest accounting of what this document does *not* claim:
 - No automated secrets-scanning is wired into a CI pipeline before commits — this is currently a manual discipline (checking `git status`/`git diff` before committing), not an enforced gate.
 - No formal code-review policy exists yet beyond "changes to `GraphAPI.psm1` (auth) and the audit check query logic (`AuditChecks.psm1`) warrant extra scrutiny," since the former is the only path to Graph and the latter has direct compliance impact if a check silently stops detecting something it should.
 - No automated report-retention/expiry policy (see Data Retention above).
-- This tool has been validated end-to-end against one M365 developer tenant. It has not been tested against a production tenant with real user/guest volume, nested PIM-eligible role assignments, or CA policies in report-only mode — behavior there is expected to work based on the Graph API contract, but isn't yet confirmed.
+- This tool has been validated end-to-end against one M365 developer tenant without Entra ID P1/P2, where only 2 of the 6 checks can run. The licence-gated checks are covered by mocked Pester tests built on the documented Graph response shapes, not by a live tenant. It has not been run against a production tenant with real user/guest volume.
 - **The vendored `dashboard/msal-browser.min.js` is a supply-chain surface.** It's committed as a static file rather than loaded from a CDN specifically to avoid a *runtime* third-party dependency (see TECHNICAL.md), but that only shifts the trust decision to update time: pulling in a newer version means trusting whatever that npm release contains. Mitigated by pinning one exact version, recording its source/SHA-256 in a header comment in the file itself, and treating changes to it with the same review scrutiny already called out above for `GraphAPI.psm1`/`AuditChecks.psm1`.
 - **Live Mode originally used MSAL's popup login flow; it was replaced with the redirect flow after testing surfaced a real browser-compatibility gap:** Brave (and likely other privacy-hardened Chromium forks) blocks the cross-window polling the popup flow depends on to detect that the popup finished, so the opener tab never learned a genuinely successful login had happened, and the user saw a misleading timeout error despite Graph having issued a valid token. This wasn't caught until manual testing in Brave specifically — Chrome/Edge testing alone would have missed it. Worth remembering if any future feature needs a popup-based flow again: test it in a privacy-focused browser before considering it done.

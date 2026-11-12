@@ -1,11 +1,11 @@
 #Requires -Version 7.0
-#Requires -Modules Pester
+#Requires -Modules @{ ModuleName = "Pester"; ModuleVersion = "5.0" }
 
 <#
 .SYNOPSIS
     Pester tests for AuditChecks.psm1 and Reporting.psm1.
     Validates the JSON schema contract between PowerShell output and the dashboard.
-    Run with: Invoke-Pester .\tests\AuditChecks.Tests.ps1 -Output Detailed
+    Run with: Invoke-Pester .\tests -Output Detailed
 #>
 
 BeforeAll {

@@ -12,7 +12,9 @@ function Connect-EntraAudit {
         Establishes an authenticated Microsoft Graph session for the audit run.
     .DESCRIPTION
         Branches on authMode from audit-config.json:
-          - delegated  : interactive browser sign-in (Connect-MgGraph -Scopes)
+          - delegated  : interactive browser sign-in (Connect-MgGraph -Scopes).
+                         Device-code flow is deliberately not used: it is a common
+                         phishing vector and is often blocked by Conditional Access.
           - app-only   : certificate-based unattended auth (Connect-MgGraph -ClientId -CertificateThumbprint)
         Verifies the session after connecting and throws a clean error on failure
         without echoing credentials or raw tokens into the message.
@@ -37,10 +39,11 @@ function Connect-EntraAudit {
         switch ($Config.authMode) {
             'delegated' {
                 Write-Verbose "Starting interactive (delegated) authentication..."
-                Connect-MgGraph -Scopes $requiredScopes -TenantId $Config.tenantId -NoWelcome -UseDeviceAuthentication
+                Connect-MgGraph -Scopes $requiredScopes -TenantId $Config.tenantId -NoWelcome
             }
             'app-only' {
-                if (-not $Config.appOnly -or
+                if (-not $Config.PSObject.Properties['appOnly'] -or
+                    -not $Config.appOnly -or
                     [string]::IsNullOrWhiteSpace($Config.appOnly.clientId) -or
                     [string]::IsNullOrWhiteSpace($Config.appOnly.certificateThumbprint) -or
                     $Config.appOnly.clientId -like '<*>') {
@@ -114,18 +117,21 @@ function Invoke-GraphQuery {
             $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -OutputType PSObject
         }
         catch {
-            $statusCode = $null
-            if ($_.Exception.Response) {
-                $statusCode = $_.Exception.Response.StatusCode.value__
-            }
+            # Not every exception carries an HTTP response (DNS failures, auth
+            # errors, etc.). Under StrictMode, touching a missing .Response
+            # property throws and would mask the real error, so probe for it.
+            $httpResponse = $_.Exception.PSObject.Properties['Response']?.Value
+            $statusCode   = if ($httpResponse) { [int]$httpResponse.StatusCode } else { $null }
 
             if (($statusCode -eq 429 -or $statusCode -eq 503) -and $attempt -lt $MaxRetries) {
                 $attempt++
-                $retryAfter = $null
-                if ($_.Exception.Response -and $_.Exception.Response.Headers) {
-                    $retryAfter = $_.Exception.Response.Headers['Retry-After']
+                # HttpResponseHeaders has no string indexer; RetryAfter is the typed accessor.
+                $retryAfter   = $httpResponse.Headers.RetryAfter
+                $delaySeconds = if ($retryAfter -and $retryAfter.Delta) {
+                    [int][Math]::Ceiling($retryAfter.Delta.TotalSeconds)
+                } else {
+                    [int][Math]::Pow(2, $attempt)
                 }
-                $delaySeconds = if ($retryAfter) { [int]$retryAfter } else { [Math]::Pow(2, $attempt) }
                 Write-Warning "Graph request throttled (HTTP $statusCode). Retrying in $delaySeconds second(s) - attempt $attempt of $MaxRetries."
                 Start-Sleep -Seconds $delaySeconds
                 continue

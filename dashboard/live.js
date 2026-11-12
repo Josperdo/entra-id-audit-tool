@@ -10,10 +10,11 @@
   // and TECHNICAL.md for the full design rationale.
   //
   // Deliberately NOT "smarter" than the PowerShell checks — same endpoints,
-  // same thresholds, same simplifications (e.g. privileged-roles can't
-  // distinguish permanent vs. active-PIM assignments; ca-policy-gaps has no
-  // coverage-gap analysis). Keeping the two artifacts in parity matters more
-  // than either one being more clever on its own.
+  // same thresholds, same known limits (e.g. privileged-roles reports
+  // "active" assignments because this API can't tell permanent from
+  // activated-PIM; ca-policy-gaps checks policy state, not coverage).
+  // Keeping the two artifacts in parity matters more than either one being
+  // more clever on its own.
   // ---------------------------------------------------------------------
 
   var GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -40,12 +41,18 @@
     "b1be1c3e-b65d-4f19-8427-f6fa0d97feb9": "Conditional Access Administrator"
   };
 
+  var PRINCIPAL_TYPES = {
+    "#microsoft.graph.user": "User",
+    "#microsoft.graph.group": "Group",
+    "#microsoft.graph.servicePrincipal": "ServicePrincipal"
+  };
+
   var CHECKS = [
     ["stale-accounts", "Stale/Inactive Accounts", getStaleAccountFindings],
     ["no-mfa", "Users Without MFA", getNoMfaFindings],
     ["guest-review", "Guest Account Review", getGuestReviewFindings],
     ["privileged-roles", "Privileged Role Assignments", getPrivilegedRoleFindings],
-    ["stale-service-principals", "Stale/Orphaned Service Principals & App Registrations", getStaleServicePrincipalFindings],
+    ["stale-service-principals", "App Registration Credential Expiry", getStaleServicePrincipalFindings],
     ["ca-policy-gaps", "Conditional Access Policy Gaps", getConditionalAccessGapFindings]
   ];
 
@@ -200,8 +207,8 @@
       if (!response.ok) {
         if ((response.status === 429 || response.status === 503) && attempt < maxRetries) {
           attempt++;
-          var retryAfter = response.headers.get("Retry-After");
-          var delaySeconds = retryAfter ? parseInt(retryAfter, 10) : Math.pow(2, attempt);
+          var retryAfter = parseInt(response.headers.get("Retry-After"), 10);
+          var delaySeconds = retryAfter > 0 ? retryAfter : Math.pow(2, attempt);
           await sleep(delaySeconds * 1000);
           continue;
         }
@@ -266,12 +273,14 @@
 
   async function getStaleAccountFindings(query, config) {
     var findings = [];
-    var users = await query("/users?$select=id,userPrincipalName,displayName,accountEnabled,signInActivity");
+    var users = await query("/users?$select=id,userPrincipalName,displayName,accountEnabled,userType,signInActivity");
     var staleDays = config.thresholds.staleAccountDays;
     var now = new Date();
     var cutoff = new Date(now.getTime() - staleDays * 86400000);
 
     users.forEach(function (user) {
+      // Guests are covered by guest-review; don't double-count them here.
+      if ((user.userType || "Member") !== "Member") return;
       if (user.accountEnabled !== true) return;
       var lastSignInRaw = user.signInActivity && user.signInActivity.lastSignInDateTime;
 
@@ -279,7 +288,7 @@
         findings.push(newFinding(
           "stale-accounts", "Stale/Inactive Accounts", "Medium", "User", user.userPrincipalName,
           "Account has never signed in",
-          user.displayName + " (" + user.userPrincipalName + ") has no recorded sign-in activity.",
+          user.displayName + " (" + user.userPrincipalName + ") is enabled but has no recorded sign-in activity.",
           "Review whether this account is still needed. If not, disable or delete it in Entra ID."
         ));
         return;
@@ -334,7 +343,7 @@
         findings.push(newFinding(
           "guest-review", "Guest Account Review", "Medium", "Guest", user.userPrincipalName,
           "Guest account has never signed in",
-          user.displayName + " (" + user.userPrincipalName + ") is an enabled guest account with no recorded sign-in activity.",
+          user.displayName + " (" + user.userPrincipalName + ") is enabled but has no recorded sign-in activity.",
           "Confirm whether this guest still requires access. If not, remove the guest account to reduce the external attack surface."
         ));
         return;
@@ -364,12 +373,13 @@
       if (!roleName) return;
       if (!assignment.principal) return;
 
-      var affectedObject = assignment.principal.userPrincipalName || assignment.principal.displayName;
+      var objectType = PRINCIPAL_TYPES[assignment.principal["@odata.type"]] || "User";
+      var affectedObject = assignment.principal.userPrincipalName || assignment.principal.displayName || "(unnamed object)";
       findings.push(newFinding(
-        "privileged-roles", "Privileged Role Assignments", "Critical", "User", affectedObject,
-        "Permanent assignment to " + roleName,
-        affectedObject + " holds a permanent (non-PIM) assignment to '" + roleName + "'. Permanent assignments are always active, increasing exposure if the account is compromised.",
-        "Convert to a PIM-eligible assignment in Entra ID Privileged Identity Management. The user can then activate the role on-demand with justification and time limits."
+        "privileged-roles", "Privileged Role Assignments", "Critical", objectType, affectedObject,
+        "Active assignment to " + roleName,
+        affectedObject + " (" + objectType + ") holds an active assignment to '" + roleName + "'. This may be a standing assignment or a PIM role activated at scan time; standing assignments are always on, increasing exposure if the principal is compromised.",
+        "Confirm in Privileged Identity Management whether this assignment is permanent. If so, convert it to PIM-eligible so the role is activated on demand with justification and time limits. Reserve permanent assignments for break-glass accounts."
       ));
     });
 
@@ -398,15 +408,15 @@
         if (expiry < now) {
           var daysPast = Math.floor((now - expiry) / 86400000);
           findings.push(newFinding(
-            "stale-service-principals", "Stale/Orphaned Service Principals & App Registrations", "High", "ServicePrincipal", app.displayName,
+            "stale-service-principals", "App Registration Credential Expiry", "High", "Application", app.displayName,
             cred.credType + " '" + credName + "' expired " + daysPast + " days ago",
-            "App registration '" + app.displayName + "' has an expired " + cred.credType.toLowerCase() + " ('" + credName + "') that expired on " + isoDate(expiry) + ". Any service using this credential is likely failing silently.",
-            "Rotate the credential in the App Registration and update the consuming service. Remove the expired credential once the new one is confirmed working."
+            "App registration '" + app.displayName + "' has an expired " + cred.credType.toLowerCase() + " ('" + credName + "') that expired on " + isoDate(expiry) + ". If the app is still in use it is likely failing; if not, the registration may be abandoned.",
+            "Confirm whether the app is still in use. If it is, rotate the credential and update the consuming service. If not, remove the app registration. Either way, delete the expired credential."
           ));
         } else if (expiry < warnCutoff) {
           var daysLeft = Math.ceil((expiry - now) / 86400000);
           findings.push(newFinding(
-            "stale-service-principals", "Stale/Orphaned Service Principals & App Registrations", "Medium", "ServicePrincipal", app.displayName,
+            "stale-service-principals", "App Registration Credential Expiry", "Medium", "Application", app.displayName,
             cred.credType + " '" + credName + "' expiring in " + daysLeft + " days",
             "App registration '" + app.displayName + "' has a " + cred.credType.toLowerCase() + " ('" + credName + "') expiring on " + isoDate(expiry) + " (" + daysLeft + " days). Threshold: " + warnDays + " days.",
             "Rotate the credential before it expires to avoid service disruption. Update the consuming service and remove the old credential."
@@ -426,8 +436,8 @@
       findings.push(newFinding(
         "ca-policy-gaps", "Conditional Access Policy Gaps", "High", "Policy", "Tenant",
         "No Conditional Access policies found",
-        "No Conditional Access policies are configured in this tenant. All users and applications can authenticate without any additional access controls beyond username and password.",
-        "Create baseline CA policies: require MFA for all users, block legacy authentication protocols, and consider restricting access from high-risk locations or sign-in risk levels."
+        "No Conditional Access policies are configured in this tenant. Unless Security Defaults are enabled, users can authenticate with no controls beyond username and password.",
+        "Create baseline CA policies: require MFA for all users, block legacy authentication protocols, and consider restricting access by sign-in risk or location."
       ));
       return findings;
     }
@@ -437,7 +447,7 @@
         findings.push(newFinding(
           "ca-policy-gaps", "Conditional Access Policy Gaps", "High", "Policy", policy.displayName,
           "CA policy is disabled: " + policy.displayName,
-          "The Conditional Access policy '" + policy.displayName + "' exists but is disabled and not enforcing any controls. It was likely created with intent but never enabled, or was turned off.",
+          "The Conditional Access policy '" + policy.displayName + "' exists but is disabled and not enforcing any controls.",
           "Review the policy and re-enable it if it is still needed. If it is no longer relevant, delete it to reduce confusion."
         ));
       } else if (policy.state === "enabledForReportingButNotEnforcing") {
@@ -477,6 +487,7 @@
   async function runLiveAudit(query, config, onProgress) {
     var findings = [];
     var checksRun = [];
+    var checksFailed = [];
 
     for (var i = 0; i < CHECKS.length; i++) {
       var checkId = CHECKS[i][0];
@@ -488,10 +499,14 @@
         checksRun.push(checkId);
         onProgress(checkId, "success", result.length);
       } catch (err) {
+        // Recorded in the report so the dashboard can show "did not run"
+        // rather than letting a failed check look like a clean one.
         if (err.graphErrorCode === PREMIUM_LICENSE_ERROR) {
           onProgress(checkId, "skipped-premium");
+          checksFailed.push({ checkId: checkId, reason: "Tenant lacks Entra ID P1/P2" });
         } else {
           onProgress(checkId, "error", err.message);
+          checksFailed.push({ checkId: checkId, reason: "Check failed - see the Live Audit Progress panel" });
         }
       }
     }
@@ -500,8 +515,9 @@
       metadata: {
         tenantDomain: config.tenantId,
         generatedAt: nowIso(),
-        toolVersion: "0.1.0-live",
-        checksRun: checksRun
+        toolVersion: "0.2.0-live",
+        checksRun: checksRun,
+        checksFailed: checksFailed
       },
       summary: buildSummary(findings),
       findings: findings
@@ -564,7 +580,7 @@
       detail.textContent = "complete — " + extra + " finding(s)";
     } else if (status === "skipped-premium") {
       icon.textContent = "⚠";
-      detail.textContent = "skipped — requires Azure AD Premium P1/P2";
+      detail.textContent = "skipped — requires Entra ID P1/P2";
     } else if (status === "error") {
       icon.textContent = "✕";
       detail.textContent = "failed — " + extra;

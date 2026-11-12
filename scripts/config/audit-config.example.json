@@ -8,7 +8,6 @@
   "thresholds": {
     "staleAccountDays": 90,
     "staleGuestDays": 90,
-    "staleServicePrincipalDays": 180,
     "secretExpiryWarningDays": 30
   },
   "checks": {
@@ -20,7 +19,6 @@
     "ca-policy-gaps": true
   },
   "output": {
-    "directory": "../../reports",
     "includeCsv": true
   }
 }

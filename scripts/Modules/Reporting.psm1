@@ -24,13 +24,18 @@ function New-AuditReport {
         Array of checkId slugs that were executed.
     .PARAMETER Findings
         Combined array of finding objects from New-AuditFinding.
+    .PARAMETER ChecksFailed
+        Checks that were enabled but did not complete, as objects with
+        checkId and reason. Recorded so the dashboard can distinguish
+        "no findings" from "did not run".
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$TenantDomain,
         [Parameter(Mandatory)][string]$ToolVersion,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ChecksRun,
-        [AllowEmptyCollection()][object[]]$Findings = @()
+        [AllowEmptyCollection()][object[]]$Findings = @(),
+        [AllowEmptyCollection()][object[]]$ChecksFailed = @()
     )
 
     $bySeverity = [ordered]@{ Critical = 0; High = 0; Medium = 0; Low = 0 }
@@ -52,6 +57,7 @@ function New-AuditReport {
             generatedAt  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
             toolVersion  = $ToolVersion
             checksRun    = $ChecksRun
+            checksFailed = $ChecksFailed
         }
         summary  = [PSCustomObject]@{
             totalFindings = $Findings.Count
@@ -96,11 +102,36 @@ function Export-AuditReport {
 
     if ($IncludeCsv) {
         $csvPath = Join-Path $OutputDirectory "audit-report-$timestamp.csv"
-        $Report.findings | Export-Csv -Path $csvPath -NoTypeInformation -Encoding utf8
+        $Report.findings | ConvertTo-SafeCsvRow | Export-Csv -Path $csvPath -NoTypeInformation -Encoding utf8
         Write-Verbose "Wrote CSV report to $csvPath"
     }
 
     return $jsonPath
 }
 
-Export-ModuleMember -Function New-AuditReport, Export-AuditReport
+function ConvertTo-SafeCsvRow {
+    <#
+    .SYNOPSIS
+        Neutralises spreadsheet formula injection in finding fields.
+    .DESCRIPTION
+        Fields like affectedObject come from tenant data an attacker can
+        influence (any user can register an app named "=HYPERLINK(...)" by
+        default). Excel/Sheets execute cells starting with = + - @ or a
+        tab/CR, so those values are prefixed with a single quote, per OWASP
+        CSV injection guidance. The JSON report is left untouched.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory, ValueFromPipeline)][PSCustomObject]$InputObject)
+
+    process {
+        $row = [ordered]@{}
+        foreach ($prop in $InputObject.PSObject.Properties) {
+            $value = $prop.Value
+            if ($value -is [string] -and $value -match '^[=+\-@\t\r]') { $value = "'" + $value }
+            $row[$prop.Name] = $value
+        }
+        [PSCustomObject]$row
+    }
+}
+
+Export-ModuleMember -Function New-AuditReport, Export-AuditReport, ConvertTo-SafeCsvRow

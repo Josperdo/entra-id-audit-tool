@@ -27,6 +27,31 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$ToolVersion = '0.2.0'
+
+function Assert-AuditConfig {
+    # Fail fast with a readable message instead of a StrictMode
+    # "property cannot be found" error halfway through a run.
+    param([Parameter(Mandatory)][PSCustomObject]$Config)
+
+    foreach ($key in 'tenantId', 'authMode', 'thresholds', 'checks') {
+        if (-not $Config.PSObject.Properties[$key]) {
+            throw "audit-config.json is missing required key '$key'. Compare it against audit-config.example.json."
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($Config.tenantId) -or $Config.tenantId -like '<*>') {
+        throw "audit-config.json 'tenantId' is empty or still a placeholder."
+    }
+    foreach ($key in 'staleAccountDays', 'staleGuestDays', 'secretExpiryWarningDays') {
+        $prop    = $Config.thresholds.PSObject.Properties[$key]
+        $isValid = $prop -and ($prop.Value -is [int] -or $prop.Value -is [long]) -and
+                   $prop.Value -ge 1 -and $prop.Value -le 3650
+        if (-not $isValid) {
+            throw "audit-config.json 'thresholds.$key' must be a whole number of days between 1 and 3650."
+        }
+    }
+}
+
 # --- Imports ---
 $moduleRoot = Join-Path $PSScriptRoot 'Modules'
 Import-Module (Join-Path $moduleRoot 'GraphAPI.psm1')    -Force
@@ -37,15 +62,22 @@ Import-Module (Join-Path $moduleRoot 'Reporting.psm1')   -Force
 if (-not (Test-Path $ConfigPath)) {
     throw "Config not found at '$ConfigPath'. Copy scripts/config/audit-config.example.json to audit-config.json and fill in your tenant details."
 }
-$config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+try {
+    $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+}
+catch {
+    throw "Config at '$ConfigPath' is not valid JSON: $($_.Exception.Message)"
+}
+Assert-AuditConfig -Config $config
 
 # --- Auth ---
 Write-Host "Connecting to Microsoft Graph (tenant: $($config.tenantId), mode: $($config.authMode))..."
 Connect-EntraAudit -Config $config
 
 # --- Run checks ---
-$findings  = [System.Collections.Generic.List[object]]::new()
-$checksRun = [System.Collections.Generic.List[string]]::new()
+$findings     = [System.Collections.Generic.List[object]]::new()
+$checksRun    = [System.Collections.Generic.List[string]]::new()
+$checksFailed = [System.Collections.Generic.List[object]]::new()
 
 $checkMap = [ordered]@{
     'stale-accounts'           = { Get-StaleAccountFindings          -Config $config }
@@ -71,22 +103,36 @@ foreach ($checkId in $checkMap.Keys) {
         $checksRun.Add($checkId)
     }
     catch {
-        Write-Warning "Check '$checkId' failed: $($_.Exception.Message)"
+        # One failing check (most often a P1/P2 licensing 403) must not abort
+        # the others, but it must be recorded: "0 findings" and "didn't run"
+        # mean very different things in an audit.
+        $message = $_.Exception.Message
+        $reason  = if ($message -match 'Forbidden|403') {
+            'Access denied (missing permission/consent, or tenant lacks Entra ID P1/P2)'
+        } else {
+            'Check failed - re-run with -Verbose and see console warnings'
+        }
+        Write-Warning "Check '$checkId' failed: $message"
+        $checksFailed.Add([PSCustomObject]@{ checkId = $checkId; reason = $reason })
     }
 }
 
 # --- Report ---
 $report = New-AuditReport `
     -TenantDomain $config.tenantId `
-    -ToolVersion  '0.1.0' `
+    -ToolVersion  $ToolVersion `
     -ChecksRun    $checksRun.ToArray() `
-    -Findings     $findings.ToArray()
+    -Findings     $findings.ToArray() `
+    -ChecksFailed $checksFailed.ToArray()
 
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $outputDir   = Join-Path $projectRoot 'reports'
 
 $exportArgs = @{ Report = $report; OutputDirectory = $outputDir }
-if ($IncludeCsv -or $config.output.includeCsv) { $exportArgs.IncludeCsv = $true }
+$configWantsCsv = $config.PSObject.Properties['output'] -and
+                  $config.output.PSObject.Properties['includeCsv'] -and
+                  $config.output.includeCsv -eq $true
+if ($IncludeCsv -or $configWantsCsv) { $exportArgs.IncludeCsv = $true }
 
 $reportPath = Export-AuditReport @exportArgs
 
@@ -99,3 +145,6 @@ Write-Host "  High     : $($s.bySeverity.High)"
 Write-Host "  Medium   : $($s.bySeverity.Medium)"
 Write-Host "  Low      : $($s.bySeverity.Low)"
 Write-Host "  Report   : $reportPath"
+if ($checksFailed.Count -gt 0) {
+    Write-Warning "$($checksFailed.Count) check(s) did not complete: $(($checksFailed | ForEach-Object checkId) -join ', '). Their absence from the report is NOT a clean result."
+}
